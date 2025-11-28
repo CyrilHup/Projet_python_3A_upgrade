@@ -13,6 +13,7 @@ from Settings.setup import (
 from Controller.utils import *
 from Controller.init_assets import *
 from Controller.gui import get_scaled_gui
+import Controller.ui_theme as theme
 
 # Cache global pour les fonts (OPTIMISATION CRITIQUE)
 _font_cache = {}
@@ -170,7 +171,7 @@ def draw_map(screen, screen_width, screen_height, game_map, camera, players, tea
                 bar_y = button_y - 10
 
                 # Draw progress bar
-                pygame.draw.rect(screen, (50, 50, 50), (bar_x, bar_y, bar_width, bar_height))
+                pygame.draw.rect(screen, (40, 30, 20), (bar_x, bar_y, bar_width, bar_height))
                 fill_w = int(bar_width * entity.training_progress)
                 pygame.draw.rect(screen, (0, 220, 0), (bar_x, bar_y, fill_w, bar_height))
 
@@ -199,9 +200,7 @@ def draw_map(screen, screen_width, screen_height, game_map, camera, players, tea
                 button_y = int(ent_screen_y - offset_y - 10)
 
                 button_rect = pygame.Rect(button_x, button_y, button_width, button_height)
-                pygame.draw.rect(screen, (120, 120, 180), button_rect)
-                font_obj = get_cached_font(18)
-
+                
                 from Entity.Building.Building import UNIT_TRAINING_MAP
                 if entity.acronym in UNIT_TRAINING_MAP:
                     unit_key = UNIT_TRAINING_MAP[entity.acronym]
@@ -209,8 +208,10 @@ def draw_map(screen, screen_width, screen_height, game_map, camera, players, tea
                 else:
                     button_text = "Train ???"
 
-                text_surf = font_obj.render(button_text, True, (255, 255, 255))
-                screen.blit(text_surf, text_surf.get_rect(center=button_rect.center))
+                # Use theme button
+                mx, my = pygame.mouse.get_pos()
+                is_hovered = button_rect.collidepoint(mx, my)
+                theme.draw_button(screen, button_rect, button_text, is_hovered=is_hovered, color_normal=(100, 80, 120), color_hover=(120, 100, 140))
 
                 game_state['train_button_rects'][entity.entity_id] = button_rect
 
@@ -382,32 +383,6 @@ def draw_gui_elements(screen, screen_width, screen_height):
 
     screen.blit(minimap_panel_sprite, minimap_panel_rect.topleft)
 
-
-def draw_minimap_viewport(screen, camera, minimap_rect, scale, offset_x, offset_y, min_iso_x, min_iso_y):
-    half_screen_w = camera.width / (2 * camera.zoom)
-    half_screen_h = camera.height / (2 * camera.zoom)
-    center_iso_x = -camera.offset_x
-    center_iso_y = -camera.offset_y
-
-    left_iso_x = center_iso_x - half_screen_w
-    left_iso_y = center_iso_y - half_screen_h
-    right_iso_x = center_iso_x + half_screen_w
-    right_iso_y = center_iso_y + half_screen_h
-
-    rect_left = (left_iso_x - min_iso_x) * scale + minimap_rect.x + offset_x
-    rect_top = (left_iso_y - min_iso_y) * scale + minimap_rect.y + offset_y
-    rect_right = (right_iso_x - min_iso_x) * scale + minimap_rect.x + offset_x
-    rect_bottom = (right_iso_y - min_iso_y) * scale + minimap_rect.y + offset_y
-
-    rect_width = rect_right - rect_left
-    rect_height = rect_bottom - rect_top
-
-    pygame.draw.rect(
-        screen, 
-        (255, 255, 255), 
-        (rect_left, rect_top, rect_width, rect_height), 
-        2
-    )
 
 def draw_minimap_viewport(screen, camera, minimap_rect, scale, offset_x, offset_y, min_iso_x, min_iso_y):
     half_screen_w = camera.width / (2 * camera.zoom)

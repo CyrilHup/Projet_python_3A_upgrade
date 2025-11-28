@@ -14,6 +14,31 @@ from Models.Map import GameMap
 from random import *
 from AiUtils.aStar import a_star
 from Controller.Decisonnode import * # Import DecisionNode and trees
+from Controller.terminal_display_debug import debug_print
+
+# Debug flag pour le Bot - mettre à True pour activer les logs détaillés
+BOT_DEBUG = True
+_bot_debug_last = {}  # Dictionnaire pour throttle par message
+
+def bot_debug(message, throttle_key=None, interval=5.0):
+    """Affiche un message de debug avec throttling par clé
+    
+    Args:
+        message: Le message à afficher
+        throttle_key: Clé unique pour le throttling (si None, affiche toujours)
+        interval: Intervalle minimum entre les messages de même clé (secondes)
+    """
+    if not BOT_DEBUG:
+        return
+    
+    if throttle_key is None:
+        print(f"[BOT] {message}")
+        return
+    
+    current = time.time()
+    if throttle_key not in _bot_debug_last or current - _bot_debug_last[throttle_key] >= interval:
+        _bot_debug_last[throttle_key] = current
+        print(f"[BOT] {message}")
 
 
 class Bot:
@@ -45,14 +70,185 @@ class Bot:
         
         # Créer l'arbre de décision UNE SEULE FOIS à l'initialisation
         self.decision_tree = self.create_mode_decision_tree()
+        
+        # Debug counters
+        self._last_debug_time = 0
+        self._debug_interval = 5.0  # Afficher le debug toutes les 5 secondes
+        
+        # Cooldown pour éviter la réallocation trop fréquente
+        self._last_reallocation_time = 0
+        self._reallocation_cooldown = 2.0  # Attendre 2 secondes entre les réallocations
 
     def update(self, game_map, dt):
         # Mettre à jour la référence à game_map au cas où elle change
         self.game_map = game_map
         
-        # Évaluer l'arbre de décision
+        # Debug périodique de l'état du bot
+        current_time = time.time()
+        if current_time - self._last_debug_time > self._debug_interval:
+            self._debug_bot_state()
+            self._last_debug_time = current_time
+        
+        # PRIORITÉ 1: Assigner les villagers IDLE - c'est le plus important!
+        self._assign_idle_villagers()
+        
+        # PRIORITÉ 2: Évaluer l'arbre de décision pour les actions stratégiques
         if self.decision_tree:
             self.decision_tree.evaluate()
+    
+    def _assign_idle_villagers(self):
+        """Assigne une tâche aux villagers qui n'en ont pas - LOGIQUE SIMPLE"""
+        idle_villagers = [
+            u for u in self.team.units 
+            if isinstance(u, Villager) and u.isAlive() 
+            and u.task is None  # Seulement ceux sans tâche
+        ]
+        
+        if not idle_villagers:
+            return
+        
+        for villager in idle_villagers:
+            # 1. S'il porte des ressources, aller les déposer
+            if villager.carry and villager.carry.total() > 0:
+                drop_point = self._find_nearest_drop_point(villager)
+                if drop_point:
+                    villager.set_task('stock', drop_point)
+                    continue
+            
+            # 2. Chercher une ressource à collecter
+            resource = self._find_nearest_resource(villager)
+            if not resource:
+                resource = self._find_any_resource(villager)
+            
+            if resource:
+                villager.set_target(resource)
+                continue
+            
+            # 3. Si vraiment rien à faire, essayer de trouver un chantier de construction
+            construction_site = self._find_nearest_construction_site(villager)
+            if construction_site:
+                villager.set_task('build', construction_site)
+                continue
+
+            # 4. Si toujours rien, aller vers le TownCentre (point de ralliement)
+            town_centre = next((b for b in self.team.buildings if isinstance(b, TownCentre)), None)
+            if town_centre and math.dist((villager.x, villager.y), (town_centre.x, town_centre.y)) > 10:
+                villager.set_destination((town_centre.x, town_centre.y), self.game_map)
+                continue
+
+            bot_debug(f"Team {self.team.teamID}: Villager sans ressource à collecter!", f"no_resource_{self.team.teamID}", 10.0)
+    
+    def _find_any_resource(self, villager):
+        """Trouve une ressource n'importe où sur la carte (fallback)"""
+        # 1. D'abord chercher les Farms construites de notre équipe
+        for building in self.team.buildings:
+            if isinstance(building, Farm) and building.isBuilt() and building.isAlive():
+                return building
+        
+        # 2. Sinon chercher la ressource la plus proche sur toute la map
+        vx, vy = villager.x, villager.y
+        best_resource = None
+        best_distance = float('inf')
+        
+        # Optimisation: ne pas scanner toute la map si possible, mais ici c'est un fallback
+        # On parcourt toutes les ressources connues de la map
+        for pos, entities in self.game_map.resources.items():
+            for entity in entities:
+                if entity.isAlive() and (isinstance(entity, Tree) or isinstance(entity, Gold)):
+                    dist = abs(vx - entity.x) + abs(vy - entity.y)
+                    if dist < best_distance:
+                        best_distance = dist
+                        best_resource = entity
+        
+        return best_resource
+
+    def _find_nearest_construction_site(self, villager):
+        """Trouve le chantier de construction le plus proche"""
+        sites = [b for b in self.team.buildings if not b.isBuilt() and b.isAlive()]
+        if not sites:
+            return None
+        return min(sites, key=lambda b: abs(villager.x - b.x) + abs(villager.y - b.y))
+
+    def _find_nearest_drop_point(self, villager):
+        """Trouve le point de dépôt le plus proche"""
+        drop_points = [b for b in self.team.buildings if b.resourceDropPoint and b.isBuilt()]
+        if not drop_points:
+            return None
+        return min(drop_points, key=lambda dp: abs(villager.x - dp.x) + abs(villager.y - dp.y))
+    
+    def _find_nearest_resource(self, villager):
+        """Trouve la ressource la plus proche (Tree, Gold, ou Farm construite)"""
+        vx, vy = villager.x, villager.y
+        best_resource = None
+        best_distance = float('inf')
+        
+        # 1. D'abord chercher les Farms construites de notre équipe (priorité)
+        for building in self.team.buildings:
+            if isinstance(building, Farm) and building.isBuilt() and building.isAlive():
+                dist = abs(vx - building.x) + abs(vy - building.y)
+                if dist < best_distance:
+                    best_distance = dist
+                    best_resource = building
+        
+        # Si on a une Farm proche, l'utiliser
+        if best_resource and best_distance < 20:
+            return best_resource
+        
+        # 2. Sinon chercher Tree ou Gold sur la map
+        for radius in range(1, 30):
+            for dx in range(-radius, radius + 1):
+                for dy in range(-radius, radius + 1):
+                    if abs(dx) != radius and abs(dy) != radius:
+                        continue  # Seulement le périmètre
+                    
+                    pos = (int(vx) + dx, int(vy) + dy)
+                    entities = self.game_map.resources.get(pos)
+                    if entities:
+                        for entity in entities:
+                            if entity.isAlive() and (isinstance(entity, Tree) or isinstance(entity, Gold)):
+                                dist = abs(dx) + abs(dy)
+                                if dist < best_distance:
+                                    best_distance = dist
+                                    best_resource = entity
+            
+            if best_resource:
+                break
+        
+        return best_resource
+    
+    def _debug_bot_state(self):
+        """Affiche l'état actuel du bot pour le debug"""
+        team_id = self.team.teamID
+        villagers = [u for u in self.team.units if isinstance(u, Villager)]
+        military = [u for u in self.team.units if not isinstance(u, Villager)]
+        
+        # Compter les états des villagers
+        villager_states = {}
+        villager_tasks = {}
+        for v in villagers:
+            state = v.state or 'none'
+            task = v.task or 'none'
+            villager_states[state] = villager_states.get(state, 0) + 1
+            villager_tasks[task] = villager_tasks.get(task, 0) + 1
+        
+        # Compter les états des unités militaires
+        military_states = {}
+        for m in military:
+            has_target = 'with_target' if m.attack_target else 'no_target'
+            has_path = 'moving' if m.path else 'static'
+            key = f"{has_target}/{has_path}"
+            military_states[key] = military_states.get(key, 0) + 1
+        
+        bot_debug(f"=== Team {team_id} ({self.mode}) ===")
+        bot_debug(f"  Resources: F={self.team.resources.food} W={self.team.resources.wood} G={self.team.resources.gold}")
+        bot_debug(f"  Pop: {self.team.population}/{self.team.maximum_population}")
+        bot_debug(f"  Villagers ({len(villagers)}): states={villager_states} tasks={villager_tasks}")
+        bot_debug(f"  Military ({len(military)}): {military_states}")
+        
+        # Détail des villagers bloqués (idle sans tâche)
+        blocked_villagers = [v for v in villagers if v.state == 'idle' and v.task is None]
+        if blocked_villagers:
+            bot_debug(f"  ⚠ {len(blocked_villagers)} villagers IDLE sans tâche!")
 
     def set_priority(self, priority):
         self.priority = priority
@@ -61,11 +257,28 @@ class Bot:
         """Détermine quelle ressource récolter en priorité"""
         resources = self.team.resources
         
-        # Si on n'a pas assez de bois pour construire une ferme (60 wood), prioriser le bois
+        # 1. Vérifier les ressources pour les bâtiments nécessaires
+        needed_buildings = self.check_building_needs()
+        if needed_buildings:
+            # On regarde le premier bâtiment nécessaire
+            first_needed = needed_buildings[0]
+            if first_needed in building_class_map:
+                building_class = building_class_map[first_needed]
+                temp_b = building_class(team=self.team.teamID)
+                cost = temp_b.cost
+                
+                if resources.wood < cost.wood:
+                    return Tree
+                if resources.food < cost.food:
+                    return Farm
+                if resources.gold < cost.gold:
+                    return Gold
+
+        # 2. Si on n'a pas assez de bois pour construire une ferme (60 wood), prioriser le bois
         if resources.wood < 60:
             return Tree
         
-        # Sinon, vérifier les pénuries dans l'ordre de priorité
+        # 3. Sinon, vérifier les pénuries dans l'ordre de priorité
         RESOURCE_MAPPING = {
             "food": Farm,
             "wood": Tree,
@@ -82,11 +295,41 @@ class Bot:
 
     def reallocate_villagers(self, resource_type):
         """VERSION OPTIMISÉE - resource_type est Farm, Tree, ou Gold (classes)"""
-        # Prendre les villagers disponibles OU sans tâche
-        available_villagers = [unit for unit in self.team.units
-                               if isinstance(unit, Villager) and (unit.isAvailable() or unit.task is None)]
+        # Cooldown pour éviter la réallocation trop fréquente
+        current_time = time.time()
+        if current_time - self._last_reallocation_time < self._reallocation_cooldown:
+            return
+        
+        # Debug: montrer l'état de tous les villagers
+        all_villagers = [u for u in self.team.units if isinstance(u, Villager) and u.isAlive()]
+        villager_states = {}
+        for v in all_villagers:
+            key = f"{v.state}/{v.task}"
+            villager_states[key] = villager_states.get(key, 0) + 1
+        bot_debug(f"Team {self.team.teamID}: {len(all_villagers)} villagers - états: {villager_states}", f"villager_states_{self.team.teamID}", 5.0)
+        
+        # Prendre les villagers disponibles pour réallocation
+        available_villagers = []
+        for unit in self.team.units:
+            if not isinstance(unit, Villager):
+                continue
+            if not unit.isAlive():
+                continue
+            
+            # Villager idle (state == 'idle') ou sans tâche ou disponible
+            if unit.state == 'idle' or unit.task is None or unit.isAvailable():
+                available_villagers.append(unit)
+                continue
+            
+            # Villager qui collecte une ressource différente de celle demandée
+            if unit.task == 'collect' and unit.collect_target:
+                current_resource_type = type(unit.collect_target)
+                # Si le villager collecte une ressource différente, on peut le réallouer
+                if current_resource_type != resource_type and resource_type != Farm:
+                    available_villagers.append(unit)
         
         if not available_villagers:
+            bot_debug(f"Team {self.team.teamID}: Aucun villager disponible (besoin: {resource_type.__name__})", f"no_villager_{self.team.teamID}", 5.0)
             return
             
         # Traiter jusqu'à 3 villagers à la fois
@@ -94,7 +337,14 @@ class Bot:
         
         drop_points = [b for b in self.team.buildings if b.resourceDropPoint]
         if not drop_points:
+            bot_debug(f"Team {self.team.teamID}: Aucun point de dépôt!")
             return
+        
+        resource_name = resource_type.__name__ if resource_type else "None"
+        bot_debug(f"Team {self.team.teamID}: Réallocation de {len(villagers_to_process)} villagers vers {resource_name}")
+        
+        # Marquer qu'une réallocation a eu lieu
+        self._last_reallocation_time = current_time
         
         for villager in villagers_to_process:
             nearest_drop_point = min(
@@ -109,50 +359,45 @@ class Bot:
                                    if isinstance(farm, Farm) and farm.isBuilt() and farm.isAlive()]
                 if available_farms:
                     villager.set_target(available_farms[0])
+                    bot_debug(f"Team {self.team.teamID}: Villager assigné à ferme existante")
                     continue
                 else:
-                    # Chercher un emplacement pour construire une ferme
-                    nx, ny = int(nearest_drop_point.x), int(nearest_drop_point.y)
-                    for radius in range(1, 11):
-                        found = False
-                        for dx in range(-radius, radius + 1):
-                            for dy in range(-radius, radius + 1):
-                                if abs(dx) == radius or abs(dy) == radius:
-                                    x, y = nx + dx, ny + dy
-                                    if self.game_map.buildable_position(x, y, size=4):
-                                        if self.team.build('Farm', x, y, 1, self.game_map, True):
-                                            return
-                                        found = True
-                                        break
-                            if found:
-                                break
-                        if found:
-                            break
+                    # Pas de ferme disponible - rediriger vers le bois
+                    # La construction de Farm sera gérée par build_structure()
+                    bot_debug(f"Team {self.team.teamID}: Pas de Farm, villager assigné à Tree", f"no_farm_{self.team.teamID}", 5.0)
+                    self._assign_villager_to_resource(villager, Tree, nearest_drop_point)
                     continue
 
             # Chercher des ressources proches du drop point (Tree pour wood, Gold pour gold)
-            nx, ny = int(nearest_drop_point.x), int(nearest_drop_point.y)
-            best_resource = None
-            best_distance = float('inf')
-            
-            for radius in range(1, 20):
-                for dx in range(-radius, radius + 1):
-                    for dy in range(-radius, radius + 1):
-                        if abs(dx) == radius or abs(dy) == radius:
-                            pos = (nx + dx, ny + dy)
-                            entities = self.game_map.resources.get(pos)
-                            if entities:
-                                for entity in entities:
-                                    if isinstance(entity, resource_type):
-                                        dist = abs(dx) + abs(dy)
-                                        if dist < best_distance:
-                                            best_distance = dist
-                                            best_resource = entity
-                if best_resource:
-                    break
-            
+            self._assign_villager_to_resource(villager, resource_type, nearest_drop_point)
+    
+    def _assign_villager_to_resource(self, villager, resource_type, nearest_drop_point):
+        """Assigne un villager à une ressource proche du drop point"""
+        nx, ny = int(nearest_drop_point.x), int(nearest_drop_point.y)
+        best_resource = None
+        best_distance = float('inf')
+        
+        for radius in range(1, 20):
+            for dx in range(-radius, radius + 1):
+                for dy in range(-radius, radius + 1):
+                    if abs(dx) == radius or abs(dy) == radius:
+                        pos = (nx + dx, ny + dy)
+                        entities = self.game_map.resources.get(pos)
+                        if entities:
+                            for entity in entities:
+                                if isinstance(entity, resource_type) and entity.isAlive():
+                                    dist = abs(dx) + abs(dy)
+                                    if dist < best_distance:
+                                        best_distance = dist
+                                        best_resource = entity
             if best_resource:
-                villager.set_target(best_resource)
+                break
+        
+        if best_resource:
+            villager.set_target(best_resource)
+            bot_debug(f"Team {self.team.teamID}: Villager assigné à {resource_type.__name__} à ({best_resource.x:.0f},{best_resource.y:.0f})")
+        else:
+            bot_debug(f"Team {self.team.teamID}: Aucune ressource {resource_type.__name__} trouvée!")
 
     def priority7(self):
         resource_shortage = self.get_resource_shortage()
@@ -306,7 +551,8 @@ class Bot:
         }
         
         required_building = BUILDING_FOR_UNIT.get(unit_type)
-        has_building = any(b.acronym == required_building for b in self.team.buildings)
+        # Vérifier que le bâtiment existe ET est construit
+        has_building = any(b.acronym == required_building and b.isBuilt() for b in self.team.buildings)
         
         return has_building, "building"
 
@@ -324,6 +570,7 @@ class Bot:
         
         # Vérifier si on est proche de la limite de population
         if self.needs_population_buildings():
+            bot_debug(f"Team {self.team.teamID}: Needs pop buildings (pop={self.team.population}/{self.team.maximum_population})")
             # Priorité aux bâtiments qui augmentent la population
             for building_type in ["House", "TownCentre"]:
                 if building_type in self.check_building_needs():
@@ -331,6 +578,7 @@ class Bot:
                     return False
 
         if not can_train:
+            bot_debug(f"Team {self.team.teamID}: Cannot train {unit_type.__name__}, reason={reason}", f"train_{self.team.teamID}_{unit_type.__name__}", 10.0)
             if reason == "resources":
                 # Allouer des villageois à la récolte des ressources manquantes
                 unit_instance = unit_type(team=self.team.teamID)
@@ -379,7 +627,10 @@ class Bot:
         if villager_count < 20:
             success = self.train_units(Villager)
             if success:
+                bot_debug(f"Team {self.team.teamID}: Training villager (have {villager_count})", f"training_{self.team.teamID}", 5.0)
                 return True
+            else:
+                bot_debug(f"Team {self.team.teamID}: Failed to train villager (have {villager_count})", f"train_fail_{self.team.teamID}", 10.0)
 
         # Formation d'unités militaires si ressources suffisantes
         if military_count < 30:
@@ -395,6 +646,7 @@ class Bot:
             # Essayer de former l'unité avec la plus haute priorité
             for priority, unit_type in unit_priorities:
                 if self.train_units(unit_type):
+                    bot_debug(f"Team {self.team.teamID}: Training {unit_type.__name__}")
                     return True
 
         return False
@@ -617,12 +869,19 @@ class Bot:
             (House, "House"),
             (Camp, "Camp"),
             (Barracks, "Barracks"),
-            (Farm, "Farm"),
         ]
         
         for building_class, building_name in essential_buildings:
             if building_class not in building_counts:
                 needed_buildings.append(building_name)
+
+        # Logique dynamique pour les fermes (1 ferme pour 4 villageois)
+        num_villagers = sum(1 for u in self.team.units if isinstance(u, Villager))
+        num_farms = building_counts.get(Farm, 0)
+        desired_farms = max(1, num_villagers // 3)
+        
+        if num_farms < desired_farms:
+            needed_buildings.append("Farm")
         
         # Ajouter des maisons si proche de la limite de population
         if self.needs_population_buildings():
@@ -723,8 +982,11 @@ class Bot:
     def is_ready_to_expand(self):
         """Vérifie si le bot est prêt à s'étendre"""
         # Vérifier qu'on a une économie stable
-        if self.get_resource_shortage():
-            return False
+        # Ne pas utiliser get_resource_shortage() pour éviter la récursion infinie
+        resources = self.team.resources
+        for resource in ["food", "wood", "gold"]:
+            if getattr(resources, resource) < getattr(RESOURCE_THRESHOLDS, resource):
+                return False
             
         # Vérifier qu'on a une armée suffisante
         military_count = self.get_military_unit_count(self.team)

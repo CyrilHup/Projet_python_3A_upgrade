@@ -5,6 +5,7 @@ from Settings.setup import user_choices
 import time
 import pygame
 import os
+import Controller.ui_theme as theme
 
 from Controller.Bot import Bot
 from Models.Map import GameMap
@@ -61,25 +62,29 @@ def is_player_dead(player):
 
 def draw_game_over_overlay(screen, game_state):
     """Affiche l'écran de game over."""
-    font = pygame.font.SysFont(None, 48)
-    text = font.render(f"Joueur {game_state['winner_id']} est gagnant!", True, (255, 255, 255))
-    text_rect = text.get_rect(center=(game_state['screen_width'] // 2, game_state['screen_height'] // 2 - 50))
+    # Overlay
+    overlay = pygame.Surface((game_state['screen_width'], game_state['screen_height']), pygame.SRCALPHA)
+    overlay.fill((0, 0, 0, 200))
+    screen.blit(overlay, (0, 0))
+
+    text = theme.FONT_TITLE.render(f"Joueur {game_state['winner_id']} est gagnant!", True, theme.COLOR_ACCENT)
+    text_rect = text.get_rect(center=(game_state['screen_width'] // 2, game_state['screen_height'] // 2 - 80))
     screen.blit(text, text_rect)
 
-    button_font = pygame.font.SysFont(None, 36)
-    
+    mx, my = pygame.mouse.get_pos()
+
     # Bouton Quitter
-    button_text = button_font.render("Quitter le jeu", True, (255, 255, 255))
-    button_rect = button_text.get_rect(center=(game_state['screen_width'] // 2, game_state['screen_height'] // 2 + 50))
-    pygame.draw.rect(screen, (0, 0, 0), button_rect.inflate(20, 10))
-    screen.blit(button_text, button_rect)
+    button_rect = pygame.Rect(0, 0, 250, 50)
+    button_rect.center = (game_state['screen_width'] // 2, game_state['screen_height'] // 2 + 20)
+    is_quit_hovered = button_rect.collidepoint(mx, my)
+    theme.draw_button(screen, button_rect, "Quitter le jeu", is_hovered=is_quit_hovered, color_normal=theme.COLOR_DANGER, color_hover=(220, 100, 100))
     game_state['game_over_button_rect'] = button_rect
 
     # Bouton Menu Principal
-    main_menu_text = button_font.render("Menu Principal", True, (255, 255, 255))
-    main_menu_rect = main_menu_text.get_rect(center=(game_state['screen_width'] // 2, game_state['screen_height'] // 2 + 100))
-    pygame.draw.rect(screen, (0, 0, 0), main_menu_rect.inflate(20, 10))
-    screen.blit(main_menu_text, main_menu_rect)
+    main_menu_rect = pygame.Rect(0, 0, 250, 50)
+    main_menu_rect.center = (game_state['screen_width'] // 2, game_state['screen_height'] // 2 + 90)
+    is_menu_hovered = main_menu_rect.collidepoint(mx, my)
+    theme.draw_button(screen, main_menu_rect, "Menu Principal", is_hovered=is_menu_hovered)
     game_state['main_menu_button_rect'] = main_menu_rect
 
 
@@ -312,7 +317,8 @@ def game_loop(screen, game_map, screen_width, screen_height, players):
 
     # ==================== BOUCLE PRINCIPALE ====================
     while running:
-        with ProfileSection('frame_total'):
+        # with ProfileSection('frame_total'):
+        if True:
             current_time = time.time()
             
             # Calcul delta time
@@ -329,17 +335,20 @@ def game_loop(screen, game_map, screen_width, screen_height, players):
             if not game_state['paused']:
                 bot_update_timer += dt
                 if bot_update_timer >= bot_update_interval:
-                    with ProfileSection('bot_update'):
+                    # with ProfileSection('bot_update'):
+                    if True:
                         for bot in bots:
                             bot.update(game_map, bot_update_interval)
                     bot_update_timer = 0
 
             # Gestion caméra et événements (mode GUI uniquement)
             if not is_terminal_only:
-                with ProfileSection('handle_camera'):
+                # with ProfileSection('handle_camera'):
+                if True:
                     handle_camera(camera, raw_dt * GAME_SPEED)
                 
-                with ProfileSection('handle_events'):
+                # with ProfileSection('handle_events'):
+                if True:
                     for event in pygame.event.get():
                         handle_events(event, game_state)
                         
@@ -385,7 +394,8 @@ def game_loop(screen, game_map, screen_width, screen_height, players):
             update_counter += dt
             if update_counter > 1:
                 update_counter = 0
-                with ProfileSection('update_minimap'):
+                # with ProfileSection('update_minimap'):
+                if True:
                     update_minimap_elements(game_state)
 
         # Mise à jour surfaces joueur
@@ -406,7 +416,8 @@ def game_loop(screen, game_map, screen_width, screen_height, players):
                 )
                 game_state['player_info_updated'] = False
 
-            with ProfileSection('update_game_state'):
+            # with ProfileSection('update_game_state'):
+            if True:
                 update_game_state(game_state, dt)
 
         # Vérification joueurs éliminés
@@ -436,15 +447,18 @@ def game_loop(screen, game_map, screen_width, screen_height, players):
         if screen is not None and draw_timer >= 1 / FPS_DRAW_LIMITER:
             draw_timer = 0
             
-            with ProfileSection('screen_fill'):
+            # with ProfileSection('screen_fill'):
+            if True:
                 screen.fill((0, 0, 0))
             
-            with ProfileSection('draw_map'):
+            # with ProfileSection('draw_map'):
+            if True:
                 draw_map(screen, screen_width, screen_height, game_map, camera,
                         players, game_state['team_colors'], game_state, dt)
 
             if game_state['show_gui_elements']:
-                with ProfileSection('draw_gui'):
+                # with ProfileSection('draw_gui'):
+                if True:
                     draw_gui_elements(screen, screen_width, screen_height)
                     screen.blit(game_state['minimap_background'], game_state['minimap_background_rect'].topleft)
                     screen.blit(game_state['minimap_entities_surface'], game_state['minimap_background_rect'].topleft)
@@ -481,23 +495,26 @@ def game_loop(screen, game_map, screen_width, screen_height, players):
             if game_state.get('game_over', False):
                 draw_game_over_overlay(screen, game_state)
             
+            mx, my = pygame.mouse.get_pos()
+
             if game_state.get('options_menu_active'):
-                draw_options_menu(screen, game_state)
+                draw_options_menu(screen, game_state, mx, my)
                 draw_pointer(screen)
                 pygame.display.flip()
                 continue
                 
             if game_state.get('pause_menu_active'):
-                draw_pause_menu(screen, game_state)
+                draw_pause_menu(screen, game_state, mx, my)
                 draw_pointer(screen)
                 pygame.display.flip()
                 continue
 
-            with ProfileSection('display_flip'):
+            # with ProfileSection('display_flip'):
+            if True:
                 pygame.display.flip()
             
             # Tick du profiler
-            tick_frame()
+            # tick_frame()
 
         # Synchronisation (vérification moins fréquente)
         if check_and_load_sync(game_map):

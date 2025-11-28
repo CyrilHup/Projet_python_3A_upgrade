@@ -33,6 +33,7 @@ class Villager(Unit):
         self.build_target = None
         self.stock_target = None
         self.task_timer = 0
+        self.last_resource_type = None
 
     # ---------------- Update Unit ---------------
     def update(self, game_map, dt):
@@ -75,6 +76,7 @@ class Villager(Unit):
                 if type(target).__name__ == "Farm" and not target.isBuilt():
                     return
                 self.set_task('collect', target)
+                self.last_resource_type = type(target)
 
             elif target.team != self.team:
                 self.attack_target = target
@@ -89,11 +91,50 @@ class Villager(Unit):
             return True
         return False
 
+    def find_nearby_resource(self, game_map, resource_type):
+        """Cherche une ressource du même type à proximité"""
+        if not resource_type:
+            return None
+        
+        vx, vy = int(self.x), int(self.y)
+        best_resource = None
+        best_distance = float('inf')
+        
+        # Chercher dans un rayon de 10 cases
+        for radius in range(1, 11):
+            for dx in range(-radius, radius + 1):
+                for dy in range(-radius, radius + 1):
+                    if abs(dx) != radius and abs(dy) != radius:
+                        continue
+                    
+                    pos = (vx + dx, vy + dy)
+                    entities = game_map.resources.get(pos)
+                    if entities:
+                        for entity in entities:
+                            if isinstance(entity, resource_type) and entity.isAlive():
+                                dist = abs(dx) + abs(dy)
+                                if dist < best_distance:
+                                    best_distance = dist
+                                    best_resource = entity
+            if best_resource:
+                return best_resource
+        return None
+
     def seekCollect(self, game_map, dt):
         if self.task != 'collect':
             return
 
         if not self.collect_target or not self.collect_target.isAlive():
+            # Si la cible est morte mais qu'on n'est pas plein, chercher une autre ressource
+            if self.carry.total() < MAXIMUM_CARRY and self.last_resource_type:
+                new_target = self.find_nearby_resource(game_map, self.last_resource_type)
+                if new_target:
+                    self.collect_target = new_target
+                    # Recalculer le path vers la nouvelle cible
+                    self.path = []
+                    self.set_destination((self.collect_target.x, self.collect_target.y), game_map)
+                    return
+
             # Ne passer à stock que si on a des ressources à déposer
             if self.carry.total() > 0:
                 # S'assurer qu'on a un stock_target avant de passer en stock
@@ -142,6 +183,14 @@ class Villager(Unit):
                         if self.carry.total() > 0:
                             self.task = 'stock'
                         else:
+                            # Essayer de trouver une autre ressource accessible
+                            if self.last_resource_type:
+                                new_target = self.find_nearby_resource(game_map, self.last_resource_type)
+                                if new_target and new_target != self.collect_target:
+                                    self.collect_target = new_target
+                                    self.pathfinding_attempts = 0
+                                    return
+                            
                             self.task = None
                             self.collect_target = None
                         self.pathfinding_attempts = 0
@@ -187,7 +236,14 @@ class Villager(Unit):
             if self.collect_target and self.collect_target.isAlive():
                 self.task = 'collect'
             else:
-                # Chercher une nouvelle ressource du même type ou passer en idle
+                # Chercher une nouvelle ressource du même type
+                if self.last_resource_type:
+                    new_target = self.find_nearby_resource(game_map, self.last_resource_type)
+                    if new_target:
+                        self.collect_target = new_target
+                        self.task = 'collect'
+                        return
+
                 self.task = None
                 self.collect_target = None
             return
@@ -203,6 +259,14 @@ class Villager(Unit):
                 if self.collect_target and self.collect_target.isAlive():
                     self.task = 'collect'
                 else:
+                    # Chercher une nouvelle ressource du même type
+                    if self.last_resource_type:
+                        new_target = self.find_nearby_resource(game_map, self.last_resource_type)
+                        if new_target:
+                            self.collect_target = new_target
+                            self.task = 'collect'
+                            return
+
                     self.task = None
                     self.collect_target = None
             elif not self.path:

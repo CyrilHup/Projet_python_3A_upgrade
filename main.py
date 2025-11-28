@@ -63,7 +63,7 @@ def ask_terminal_inputs_non_blocking():
 
         if step == 0:
             print("\n--- Choisir le mode d'affichage ---")
-            print("[1] GUI only / [2] Terminal only / [3] Both ? (défaut=3)")
+            print("[1] GUI only / [2] Terminal only / [3] Both ? (défaut=1)")
             step = 1
             current_input = ""
 
@@ -129,10 +129,10 @@ def ask_terminal_inputs_non_blocking():
             if char == '\r':  # Enter key pressed
                 line = current_input.strip()
                 if step == 1:  # Display mode
-                    # Par défaut => both
+                    # Par défaut => GUI
                     if line == "":
-                        user_choices["index_terminal_display"] = 2
-                        print("Aucun choix => Both.")
+                        user_choices["index_terminal_display"] = 0
+                        print("Aucun choix => GUI only.")
                     elif line in ['1', '2', '3']:
                         val = int(line)
                         if val == 1:
@@ -490,7 +490,7 @@ def main():
 
             user_choices.clear()
             user_choices.update({
-                "index_terminal_display": 2,
+                "index_terminal_display": 0,
                 "load_game": False,
                 "chosen_save": "",
                 "grid_width": 120,

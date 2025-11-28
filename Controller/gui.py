@@ -9,9 +9,11 @@ from Controller.init_assets import *
 from Settings.setup import *
 from Controller.utils import to_isometric, get_color_for_terrain
 from Entity.Building import Building
+import Controller.ui_theme as theme  # Import the theme
 
 pygame.init()
-font = pygame.font.SysFont(None, 32)
+theme.init_theme() # Initialize theme
+font = theme.FONT_MAIN # Use theme font as default
 
 #user_choices["index_terminal_display"] = 2
 
@@ -122,7 +124,7 @@ def run_gui_menu(screen, sw, sh):
     toggle_button = {
         "rect": pygame.Rect(sw // 2 - 200, 430, 400, 50),
         "texts": ["Gui ONLY", "Terminal Display ONLY", "Terminal and Gui Display"],
-        "index": 2
+        "index": user_choices["index_terminal_display"]
     }
 
     save_files = []
@@ -138,7 +140,8 @@ def run_gui_menu(screen, sw, sh):
     gold_checked = user_choices["gold_at_center"]
     combo_open = None
 
-    valid_rect = draw_config_menu(screen, sw, sh, idx_width, idx_height, idx_nbot, idx_lvl, gold_checked, combo_open, idx_bot_mode) # Passez idx_bot_mode
+    # Initial call with dummy mouse coordinates
+    valid_rect, _ = draw_config_menu(screen, sw, sh, idx_width, idx_height, idx_nbot, idx_lvl, gold_checked, combo_open, idx_bot_mode, 0, 0)
 
     running = True
     while running:
@@ -349,21 +352,22 @@ def run_gui_menu(screen, sw, sh):
                     combo_open = None
 
         if show_main_menu:
-            draw_main_menu(screen, sw, sh, main_buttons)
+            draw_main_menu(screen, sw, sh, main_buttons, mx, my)
         elif show_config_menu:
             # Draw toggle button and back button first
-            draw_choose_display(screen, toggle_button)
-            pygame.draw.rect(screen, (100, 100, 200), back_button["rect"])
-            txt = font.render(back_button["text"], True, (255,255,255))
-            screen.blit(txt, txt.get_rect(center=back_button["rect"].center))
+            draw_choose_display(screen, toggle_button, mx, my)
+            
+            is_back_hovered = back_button["rect"].collidepoint(mx, my)
+            theme.draw_button(screen, back_button["rect"], back_button["text"], is_hovered=is_back_hovered, color_normal=theme.COLOR_DANGER, color_hover=(220, 100, 100))
+
             # Finally draw config menu so expanded combo appears on top
             valid_rect, expanded_rect = draw_config_menu(screen, sw, sh,
-                idx_width, idx_height, idx_nbot, idx_lvl, gold_checked, combo_open, idx_bot_mode)
+                idx_width, idx_height, idx_nbot, idx_lvl, gold_checked, combo_open, idx_bot_mode, mx, my)
         elif show_load_menu:
-            draw_load_menu(screen, sw, sh, save_files)
-            pygame.draw.rect(screen, (100, 100, 200), back_button["rect"])
-            txt = font.render(back_button["text"], True, (255,255,255))
-            screen.blit(txt, txt.get_rect(center=back_button["rect"].center))
+            draw_load_menu(screen, sw, sh, save_files, mx, my)
+            
+            is_back_hovered = back_button["rect"].collidepoint(mx, my)
+            theme.draw_button(screen, back_button["rect"], back_button["text"], is_hovered=is_back_hovered, color_normal=theme.COLOR_DANGER, color_hover=(220, 100, 100))
 
         pygame.display.flip()
 
@@ -371,88 +375,106 @@ def run_gui_menu(screen, sw, sh):
         # d'après l'état du bouton toggle_button
         user_choices["index_terminal_display"] = toggle_button["index"]
 
-def draw_choose_display(screen, toggle_button):
-    pygame.draw.rect(screen, (0, 122, 255), toggle_button["rect"])
-    font = pygame.font.Font(None, 36)
-    text_surface = font.render(toggle_button["texts"][toggle_button["index"]], True, (255, 255, 255))
-    text_rect = text_surface.get_rect(center=toggle_button["rect"].center)
-    screen.blit(text_surface, text_rect)
+def draw_choose_display(screen, toggle_button, mx, my):
+    is_hovered = toggle_button["rect"].collidepoint(mx, my)
+    theme.draw_button(screen, toggle_button["rect"], toggle_button["texts"][toggle_button["index"]], is_hovered=is_hovered, color_normal=(0, 100, 200))
 
-def draw_main_menu(screen, sw, sh, buttons):
+def draw_main_menu(screen, sw, sh, buttons, mx, my):
+    # Draw background (optional, if not covered by screen fill)
+    # screen.fill(theme.COLOR_BACKGROUND)
+    
+    # Title
+    title_surf = theme.FONT_TITLE.render("Age of Strategy", True, theme.COLOR_ACCENT)
+    title_rect = title_surf.get_rect(center=(sw//2, sh//4))
+    screen.blit(title_surf, title_rect)
+
     gap = 20
-    start_y = (sh - (len(buttons)*50 + gap*(len(buttons)-1))) // 2
+    start_y = (sh - (len(buttons)*60 + gap*(len(buttons)-1))) // 2 + 50 # Shifted down a bit
+    
     for i, btn in enumerate(buttons):
+        btn["rect"].width = 300
+        btn["rect"].height = 60
         btn["rect"].centerx = sw//2
-        btn["rect"].y = start_y + i*(50+gap)
-        pygame.draw.rect(screen, (100, 100, 200), btn["rect"])
-        txt = font.render(btn["text"], True, (255,255,255))
-        screen.blit(txt, txt.get_rect(center=btn["rect"].center))
+        btn["rect"].y = start_y + i*(60+gap)
+        
+        is_hovered = btn["rect"].collidepoint(mx, my)
+        theme.draw_button(screen, btn["rect"], btn["text"], is_hovered=is_hovered)
 
 VALID_BOT_MODES = ["economique", "defensif", "offensif"] # Added valid bot modes
 
-def draw_config_menu(screen, sw, sh, idx_width, idx_height, idx_nbot, idx_lvl, gold_checked, combo_open, idx_mode): # Added idx_bot_mode
+def draw_config_menu(screen, sw, sh, idx_width, idx_height, idx_nbot, idx_lvl, gold_checked, combo_open, idx_mode, mx, my): # Added idx_bot_mode
     # Dessiner d'abord tous les éléments de base
     if combo_open != "width":
-        draw_combo_box(screen, sw//2 - 100, 100, 200, 30, f"Largeur: {VALID_GRID_SIZES[idx_width]}", None, idx_width, combo_type="width")
+        draw_combo_box(screen, sw//2 - 100, 100, 200, 30, f"Largeur: {VALID_GRID_SIZES[idx_width]}", None, idx_width, combo_type="width", mx=mx, my=my)
     if combo_open != "height":
-        draw_combo_box(screen, sw//2 - 100, 160, 200, 30, f"Hauteur: {VALID_GRID_SIZES[idx_height]}", None, idx_height, combo_type="height")
+        draw_combo_box(screen, sw//2 - 100, 160, 200, 30, f"Hauteur: {VALID_GRID_SIZES[idx_height]}", None, idx_height, combo_type="height", mx=mx, my=my)
     if combo_open != "nbot":
-        draw_combo_box(screen, sw//2 - 100, 220, 200, 30, f"Bots: {VALID_BOTS_COUNT[idx_nbot]}", None, idx_nbot, combo_type="nbot")
+        draw_combo_box(screen, sw//2 - 100, 220, 200, 30, f"Bots: {VALID_BOTS_COUNT[idx_nbot]}", None, idx_nbot, combo_type="nbot", mx=mx, my=my)
     if combo_open != "lvl":
-        draw_combo_box(screen, sw//2 - 100, 280, 200, 30, f"Niveau: {VALID_LEVELS[idx_lvl]}", None, idx_lvl, combo_type="lvl")
+        draw_combo_box(screen, sw//2 - 100, 280, 200, 30, f"Niveau: {VALID_LEVELS[idx_lvl]}", None, idx_lvl, combo_type="lvl", mx=mx, my=my)
     if combo_open != "bot_mode":
-        draw_combo_box(screen, sw//2 - 100, 340, 200, 30, f"Mode IA: {VALID_BOT_MODES[idx_mode]}", None, idx_mode, combo_type="bot_mode")
+        draw_combo_box(screen, sw//2 - 100, 340, 200, 30, f"Mode IA: {VALID_BOT_MODES[idx_mode]}", None, idx_mode, combo_type="bot_mode", mx=mx, my=my)
 
     # Dessiner la checkbox et le bouton de validation
     chk_rect = pygame.Rect(sw//2 - 100, 380, 30, 30)  # Moved up to avoid overlap
-    pygame.draw.rect(screen, (200,200,200), chk_rect)
+    
+    # Checkbox style
+    # Draw a small wood panel for the checkbox
+    theme.draw_wood_rect(screen, chk_rect, theme.COLOR_BUTTON_NORMAL, border_width=1)
+    
     if gold_checked:
-        pygame.draw.line(screen, (0,0,0), (chk_rect.x+5, chk_rect.centery), (chk_rect.right-5, chk_rect.centery), 3)
-    txt = font.render("Or au centre ?", True, (255,255,255))
-    screen.blit(txt, (chk_rect.right+10, chk_rect.y))
+        # Draw a checkmark or filled square
+        inner_rect = chk_rect.inflate(-8, -8)
+        pygame.draw.rect(screen, theme.COLOR_SUCCESS, inner_rect)
+        # Add a small highlight to the checkmark
+        pygame.draw.rect(screen, (100, 200, 100), inner_rect, 1)
+        
+    txt = theme.FONT_MAIN.render("Or au centre ?", True, theme.COLOR_TEXT)
+    screen.blit(txt, (chk_rect.right+10, chk_rect.y + 2))
 
-    valid_rect = pygame.Rect(sw//2 - 50, 500, 100, 40)  # Adjusted to keep spacing
-    pygame.draw.rect(screen, (80,200,80), valid_rect)
-    vtxt = font.render("Valider", True, (255,255,255))
-    screen.blit(vtxt, vtxt.get_rect(center=valid_rect.center))
+    valid_rect = pygame.Rect(sw//2 - 75, 500, 150, 50)  # Adjusted to keep spacing
+    is_valid_hovered = valid_rect.collidepoint(mx, my)
+    theme.draw_button(screen, valid_rect, "Valider", is_hovered=is_valid_hovered, color_normal=theme.COLOR_SUCCESS, color_hover=(100, 220, 100))
 
     # Dessiner le menu déroulant actif EN DERNIER pour qu'il soit au-dessus
     expanded_rect = None
     if combo_open == "width":
-        draw_combo_box(screen, sw//2 - 100, 100, 200, 30, f"Largeur: {VALID_GRID_SIZES[idx_width]}", VALID_GRID_SIZES, idx_width, combo_type="width")
+        draw_combo_box(screen, sw//2 - 100, 100, 200, 30, f"Largeur: {VALID_GRID_SIZES[idx_width]}", VALID_GRID_SIZES, idx_width, combo_type="width", mx=mx, my=my)
         expanded_rect = pygame.Rect(sw//2 - 100, 100 + 30, 200, ITEM_HEIGHT * min(len(VALID_GRID_SIZES), MAX_VISIBLE_ITEMS))
     elif combo_open == "height":
-        draw_combo_box(screen, sw//2 - 100, 160, 200, 30, f"Hauteur: {VALID_GRID_SIZES[idx_height]}", VALID_GRID_SIZES, idx_height, combo_type="height")
+        draw_combo_box(screen, sw//2 - 100, 160, 200, 30, f"Hauteur: {VALID_GRID_SIZES[idx_height]}", VALID_GRID_SIZES, idx_height, combo_type="height", mx=mx, my=my)
         expanded_rect = pygame.Rect(sw//2 - 100, 160 + 30, 200, ITEM_HEIGHT * min(len(VALID_GRID_SIZES), MAX_VISIBLE_ITEMS))
     elif combo_open == "nbot":
-        draw_combo_box(screen, sw//2 - 100, 220, 200, 30, f"Bots: {VALID_BOTS_COUNT[idx_nbot]}", VALID_BOTS_COUNT, idx_nbot, combo_type="nbot")
+        draw_combo_box(screen, sw//2 - 100, 220, 200, 30, f"Bots: {VALID_BOTS_COUNT[idx_nbot]}", VALID_BOTS_COUNT, idx_nbot, combo_type="nbot", mx=mx, my=my)
         expanded_rect = pygame.Rect(sw//2 - 100, 220 + 30, 200, ITEM_HEIGHT * min(len(VALID_BOTS_COUNT), MAX_VISIBLE_ITEMS))
     elif combo_open == "lvl":
-        draw_combo_box(screen, sw//2 - 100, 280, 200, 30, f"Niveau: {VALID_LEVELS[idx_lvl]}", VALID_LEVELS, idx_lvl, combo_type="lvl")
+        draw_combo_box(screen, sw//2 - 100, 280, 200, 30, f"Niveau: {VALID_LEVELS[idx_lvl]}", VALID_LEVELS, idx_lvl, combo_type="lvl", mx=mx, my=my)
         expanded_rect = pygame.Rect(sw//2 - 100, 280 + 30, 200, ITEM_HEIGHT * min(len(VALID_LEVELS), MAX_VISIBLE_ITEMS))
     elif combo_open == "bot_mode":
-        draw_combo_box(screen, sw//2 - 100, 340, 200, 30, f"Mode IA: {VALID_BOT_MODES[idx_mode]}", VALID_BOT_MODES, idx_mode, combo_type="bot_mode")
+        draw_combo_box(screen, sw//2 - 100, 340, 200, 30, f"Mode IA: {VALID_BOT_MODES[idx_mode]}", VALID_BOT_MODES, idx_mode, combo_type="bot_mode", mx=mx, my=my)
         expanded_rect = pygame.Rect(sw//2 - 100, 340 + 30, 200, ITEM_HEIGHT * min(len(VALID_BOT_MODES), MAX_VISIBLE_ITEMS))
 
     return valid_rect, expanded_rect
 
-def draw_load_menu(screen, sw, sh, save_files):
+
+def draw_load_menu(screen, sw, sh, save_files, mx, my):
     start_y = 100
     gap = 5
-    block_h = 30
-    txt = font.render("Choisissez la sauvegarde :", True, (255,255,255))
-    screen.blit(txt, (sw//2 - txt.get_width()//2, 50))
+    block_h = 40
+    
+    txt = theme.FONT_TITLE.render("Choisissez la sauvegarde :", True, theme.COLOR_TEXT)
+    screen.blit(txt, (sw//2 - txt.get_width()//2, 40))
+    
     for i, sf in enumerate(save_files):
-        rect = pygame.Rect(sw//2 - 150, start_y + i*(block_h+gap), 300, block_h)
-        pygame.draw.rect(screen, (180,80,80), rect)
-        txt2 = font.render(sf, True, (255,255,255))
-        screen.blit(txt2, txt2.get_rect(center=rect.center))
+        rect = pygame.Rect(sw//2 - 200, start_y + i*(block_h+gap), 400, block_h)
+        is_hovered = rect.collidepoint(mx, my)
+        theme.draw_button(screen, rect, sf, is_hovered=is_hovered, color_normal=(80, 60, 60), color_hover=(120, 80, 80))
 
-def draw_combo_box(screen, x, y, w, h, text, items_list, selected_idx, combo_type=None):
+def draw_combo_box(screen, x, y, w, h, text, items_list, selected_idx, combo_type=None, mx=0, my=0):
     # Dessiner d'abord le bouton du combo box
     box_rect = pygame.Rect(x, y, w, h)
-    pygame.draw.rect(screen, (60,60,160), box_rect)
-    screen.blit(font.render(text, True, (255,255,255)), (x+5, y+3))
+    is_hovered = box_rect.collidepoint(mx, my)
+    theme.draw_button(screen, box_rect, text, is_hovered=is_hovered)
 
     # Si on a une liste d'éléments, dessiner le menu déroulant
     if items_list:
@@ -464,16 +486,22 @@ def draw_combo_box(screen, x, y, w, h, text, items_list, selected_idx, combo_typ
         dropdown_surf = pygame.Surface((w, dropdown_height), pygame.SRCALPHA)
 
         # Remplir avec un fond semi-transparent
-        dropdown_surf.fill((0, 0, 0, 160))
+        dropdown_surf.fill(theme.COLOR_PANEL_BG)
+        pygame.draw.rect(dropdown_surf, theme.COLOR_BORDER, dropdown_surf.get_rect(), 1)
 
         # Dessiner chaque élément de la liste
         for i, val in enumerate(visible_items):
             item_rect = pygame.Rect(0, i*ITEM_HEIGHT, w, ITEM_HEIGHT)
-            if i % 2 == 0:  # Alterner les couleurs de fond
-                pygame.draw.rect(dropdown_surf, (60,60,120), item_rect)
-            else:
-                pygame.draw.rect(dropdown_surf, (70,70,130), item_rect)
-            txt = font.render(str(val), True, (255,255,255))
+            
+            # Check hover relative to screen
+            screen_item_rect = pygame.Rect(x, y + h + i*ITEM_HEIGHT, w, ITEM_HEIGHT)
+            is_item_hovered = screen_item_rect.collidepoint(mx, my)
+            
+            bg_color = theme.COLOR_BUTTON_HOVER if is_item_hovered else ((60,60,80) if i % 2 == 0 else (50,50,70))
+            
+            pygame.draw.rect(dropdown_surf, bg_color, item_rect)
+            
+            txt = theme.FONT_MAIN.render(str(val), True, theme.COLOR_TEXT)
             txt_rect = txt.get_rect(center=item_rect.center)
             dropdown_surf.blit(txt, txt_rect)
 
@@ -531,108 +559,116 @@ def create_player_info_surface(selected_player, screen_width, screen_height, tea
     if user_choices["index_terminal_display"] == 1:  # Terminal only mode
         return None
 
-    font_info = pygame.font.Font(None, 24)
-    padding_x = int(screen_width * 0.0)  # 0.7% du screen width comme padding horizontal
-    padding_y = int(screen_height * 0.028)  # 2% du screen height comme padding vertical
-    surface = pygame.Surface((screen_width, 300), pygame.SRCALPHA)
+    # Create a panel surface
+    panel_height = 220
+    surface = pygame.Surface((screen_width, panel_height), pygame.SRCALPHA)
+    
+    # Draw panel background
+    theme.draw_panel(surface, pygame.Rect(10, 10, screen_width - 20, panel_height - 20))
 
-    spacing_x = int(screen_width * 0.057)  # 3% du screen width entre les éléments
-    spacing_y = int(screen_height * 0.022)  # 2% de la hauteur de l'écran entre les éléments
+    padding_x = 30
+    padding_y = 30
+    spacing_y = 25
 
-    gold_str = f"{selected_player.resources.gold}"
-    wood_str = f"{selected_player.resources.wood}"
-    food_str = f"{selected_player.resources.food}"
-
-    gold_surf = font_info.render(gold_str, True, (255, 255, 255))
-    wood_surf = font_info.render(wood_str, True, (255, 255, 255))
-    food_surf = font_info.render(food_str, True, (255, 255, 255))
-
+    # Resources
+    gold_str = f"Gold: {selected_player.resources.gold}"
+    wood_str = f"Wood: {selected_player.resources.wood}"
+    food_str = f"Food: {selected_player.resources.food}"
+    
+    # Use a slightly larger font for resources
+    res_font = theme.FONT_MAIN
+    
+    # Draw resources in a row
     x_offset = padding_x
-    surface.blit(gold_surf, (x_offset, padding_y))  # Utilise padding_y au lieu de padding
-    x_offset += gold_surf.get_width() + spacing_x
-    surface.blit(wood_surf, (x_offset, padding_y))  # Utilise padding_y au lieu de padding
-    x_offset += wood_surf.get_width() + spacing_x
-    surface.blit(food_surf, (x_offset, padding_y))  # Utilise padding_y au lieu de padding
+    for res_str, color in [(gold_str, (255, 215, 0)), (wood_str, (160, 82, 45)), (food_str, (255, 100, 100))]:
+        surf = res_font.render(res_str, True, color)
+        surface.blit(surf, (x_offset, padding_y))
+        x_offset += surf.get_width() + 40
 
-    y_after_resources = padding_y + gold_surf.get_height() + spacing_y
+    y_cursor = padding_y + 40
 
     # Player name
     team_color = team_colors[selected_player.teamID % len(team_colors)]
-    player_name_surface = font_info.render(f"Player {selected_player.teamID}", True, team_color)
-    surface.blit(player_name_surface, (padding_x, y_after_resources))
-    y_after_resources += player_name_surface.get_height() + spacing_y
+    player_name_surface = theme.FONT_TITLE.render(f"Player {selected_player.teamID}", True, team_color)
+    # Align right
+    surface.blit(player_name_surface, (screen_width - player_name_surface.get_width() - 30, padding_y))
 
     # Units
     unit_counts = Counter(unit.acronym for unit in selected_player.units)
-    units_text = "Units - " + ", ".join([f"{acronym}: {count}" for acronym, count in unit_counts.items()])
-    units_surface = font_info.render(units_text, True, (255, 255, 255))
-    surface.blit(units_surface, (padding_x, y_after_resources))
-    y_after_resources += units_surface.get_height() + spacing_y
+    units_text = "Units: " + ", ".join([f"{acronym}: {count}" for acronym, count in unit_counts.items()])
+    units_surface = theme.FONT_SMALL.render(units_text, True, theme.COLOR_TEXT)
+    surface.blit(units_surface, (padding_x, y_cursor))
+    y_cursor += spacing_y
 
     # Buildings
     building_counts = Counter(building.acronym for building in selected_player.buildings)
-    buildings_text = "Buildings - " + ", ".join([f"{acronym}: {count}" for acronym, count in building_counts.items()])
-    buildings_surface = font_info.render(buildings_text, True, (255, 255, 255))
-    surface.blit(buildings_surface, (padding_x, y_after_resources))
-    y_after_resources += buildings_surface.get_height() + spacing_y
+    buildings_text = "Buildings: " + ", ".join([f"{acronym}: {count}" for acronym, count in building_counts.items()])
+    buildings_surface = theme.FONT_SMALL.render(buildings_text, True, theme.COLOR_TEXT)
+    surface.blit(buildings_surface, (padding_x, y_cursor))
+    y_cursor += spacing_y
 
     # Population
     population_text = f"Population: {selected_player.population} / {selected_player.maximum_population}"
-    population_surface = font.render(population_text, True, (255, 255, 255))
-    surface.blit(population_surface, (padding_x, y_after_resources))
+    population_surface = theme.FONT_SMALL.render(population_text, True, theme.COLOR_TEXT_DIM)
+    surface.blit(population_surface, (padding_x, y_cursor))
 
     return surface
 
 def draw_game_over_overlay(screen, game_state):
     overlay = pygame.Surface((screen.get_width(), screen.get_height()), pygame.SRCALPHA)
-    overlay.fill((50, 50, 50, 150))
-    font_big = pygame.font.SysFont(None, 60)
-    font_small = pygame.font.SysFont(None, 40)
-
+    overlay.fill((0, 0, 0, 200))
+    
     winner_id = game_state.get('winner_id', '?')
-    text_surf = font_big.render(f"Bravo ! Joueur {winner_id} a gagné", True, (255, 255, 255))
+    text_surf = theme.FONT_TITLE.render(f"Bravo ! Joueur {winner_id} a gagné", True, theme.COLOR_ACCENT)
     text_rect = text_surf.get_rect(center=(screen.get_width()//2, screen.get_height()//3))
     overlay.blit(text_surf, text_rect)
 
-    button_text = "Quitter le jeu"
-    button_surf = font_small.render(button_text, True, (255, 255, 255))
-    button_width = button_surf.get_width() + 20
-    button_height = button_surf.get_height() + 10
-    button_x = (screen.get_width() - button_width) // 2
-    button_y = screen.get_height() // 2
-    button_rect = pygame.Rect(button_x, button_y, button_width, button_height)
-    pygame.draw.rect(overlay, (100, 100, 100), button_rect)
-    overlay.blit(button_surf, button_surf.get_rect(center=button_rect.center))
+    mx, my = pygame.mouse.get_pos()
+
+    button_rect = pygame.Rect(0, 0, 250, 50)
+    button_rect.center = (screen.get_width() // 2, screen.get_height() // 2)
+    is_hovered = button_rect.collidepoint(mx, my)
+    theme.draw_button(overlay, button_rect, "Quitter le jeu", is_hovered=is_hovered, color_normal=theme.COLOR_DANGER, color_hover=(220, 100, 100))
 
     game_state['game_over_button_rect'] = button_rect
     screen.blit(overlay, (0, 0))
 
-def draw_pause_menu(screen, game_state):
-    font = pygame.font.SysFont(None, 50)
+def draw_pause_menu(screen, game_state, mx=0, my=0):
     screen_width = game_state['screen_width']
     screen_height = game_state['screen_height']
 
-    pause_text = font.render("Pause Menu", True, (255, 255, 255))
+    # Overlay
+    overlay = pygame.Surface((screen_width, screen_height), pygame.SRCALPHA)
+    overlay.fill((0, 0, 0, 180))
+    screen.blit(overlay, (0, 0))
+
+    pause_text = theme.FONT_TITLE.render("Pause Menu", True, theme.COLOR_TEXT)
     text_rect = pause_text.get_rect(center=(screen_width // 2, screen_height // 4))
     screen.blit(pause_text, text_rect)
 
-    button_font = pygame.font.SysFont(None, 36)
     labels = ["Resume", "Options", "Load Game", "Save Game", "Exit"]
-    y_start = text_rect.bottom + 40
+    y_start = text_rect.bottom + 60
     button_rects = {}
+    
+    button_width = 300
+    button_height = 50
+    gap = 20
 
     for label in labels:
-        text_surf = button_font.render(label, True, (255, 255, 255))
-        rect = text_surf.get_rect(center=(screen_width // 2, y_start))
-        pygame.draw.rect(screen, (50, 50, 50), rect.inflate(100, 20))
-        screen.blit(text_surf, rect)
-        button_rects[label] = rect.inflate(100, 20)
-        y_start += 60
+        rect = pygame.Rect(0, 0, button_width, button_height)
+        rect.centerx = screen_width // 2
+        rect.y = y_start
+        
+        is_hovered = rect.collidepoint(mx, my)
+        theme.draw_button(screen, rect, label, is_hovered=is_hovered)
+        
+        button_rects[label] = rect
+        y_start += button_height + gap
 
     game_state['pause_menu_button_rects'] = button_rects
 
 
-def draw_options_menu(screen, game_state):
+def draw_options_menu(screen, game_state, mx=0, my=0):
     """Dessine le menu d'options avec les keybindings."""
     from Settings.keybindings import (
         current_keybindings, ACTION_NAMES, ACTION_CATEGORIES, 
@@ -647,12 +683,8 @@ def draw_options_menu(screen, game_state):
     overlay.fill((30, 30, 30, 240))
     screen.blit(overlay, (0, 0))
     
-    font_title = pygame.font.SysFont(None, 48)
-    font_category = pygame.font.SysFont(None, 32)
-    font_item = pygame.font.SysFont(None, 26)
-    
     # Titre
-    title_text = font_title.render("Options - Configuration des Touches", True, (255, 255, 255))
+    title_text = theme.FONT_TITLE.render("Options - Configuration des Touches", True, theme.COLOR_TEXT)
     title_rect = title_text.get_rect(center=(screen_width // 2, 50))
     screen.blit(title_text, title_rect)
     
@@ -665,8 +697,8 @@ def draw_options_menu(screen, game_state):
     # Zone de contenu scrollable
     content_y_start = 100
     content_height = screen_height - 200
-    item_height = 35
-    category_height = 45
+    item_height = 40
+    category_height = 50
     
     # Calculer la hauteur totale du contenu
     total_height = 0
@@ -679,45 +711,54 @@ def draw_options_menu(screen, game_state):
     game_state['options_scroll_offset'] = max(0, min(game_state['options_scroll_offset'], max_scroll))
     
     # Zone de clipping pour le contenu scrollable
-    content_rect = pygame.Rect(50, content_y_start, screen_width - 100, content_height)
+    # On dessine tout sur une surface séparée puis on blit la partie visible
+    content_surf = pygame.Surface((screen_width - 100, total_height), pygame.SRCALPHA)
     
-    # Dessiner les keybindings
+    # Dessiner les keybindings sur la surface de contenu
     button_rects = {}
-    current_y = content_y_start - game_state['options_scroll_offset']
+    current_y = 0
     
     for category, actions in ACTION_CATEGORIES.items():
-        # Dessiner le nom de la catégorie seulement si visible
-        if current_y + category_height > content_y_start and current_y < content_y_start + content_height:
-            cat_text = font_category.render(f"── {category} ──", True, (200, 200, 100))
-            screen.blit(cat_text, (60, current_y))
+        # Catégorie
+        cat_text = theme.FONT_MAIN.render(f"── {category} ──", True, theme.COLOR_ACCENT)
+        content_surf.blit(cat_text, (10, current_y + 10))
         current_y += category_height
         
         for action in actions:
-            if current_y + item_height > content_y_start and current_y < content_y_start + content_height:
-                # Nom de l'action
-                action_name = ACTION_NAMES.get(action, action)
-                action_text = font_item.render(action_name, True, (255, 255, 255))
-                screen.blit(action_text, (80, current_y + 5))
-                
-                # Bouton de la touche
-                key_code = current_keybindings.get(action)
-                if game_state['waiting_for_key'] == action:
-                    key_name = "Appuyez sur une touche..."
-                    button_color = (100, 100, 200)
-                else:
-                    key_name = get_key_name(key_code)
-                    button_color = (70, 70, 70)
-                
-                key_text = font_item.render(key_name, True, (255, 255, 255))
-                button_rect = pygame.Rect(screen_width - 250, current_y + 2, 180, 30)
-                pygame.draw.rect(screen, button_color, button_rect, border_radius=5)
-                pygame.draw.rect(screen, (150, 150, 150), button_rect, 1, border_radius=5)
-                key_text_rect = key_text.get_rect(center=button_rect.center)
-                screen.blit(key_text, key_text_rect)
-                
-                button_rects[action] = button_rect
+            # Nom de l'action
+            action_name = ACTION_NAMES.get(action, action)
+            action_text = theme.FONT_SMALL.render(action_name, True, theme.COLOR_TEXT)
+            content_surf.blit(action_text, (30, current_y + 10))
+            
+            # Bouton de la touche
+            key_code = current_keybindings.get(action)
+            if game_state['waiting_for_key'] == action:
+                key_name = "Appuyez sur une touche..."
+                color_normal = theme.COLOR_BUTTON_CLICK
+            else:
+                key_name = get_key_name(key_code)
+                color_normal = theme.COLOR_BUTTON_NORMAL
+            
+            button_rect_local = pygame.Rect(screen_width - 350, current_y + 5, 200, 30)
+            
+            # Calculer la position absolue pour le hover
+            abs_y = content_y_start + current_y - game_state['options_scroll_offset']
+            button_rect_abs = pygame.Rect(button_rect_local.x + 50, abs_y, button_rect_local.width, button_rect_local.height)
+            
+            is_hovered = button_rect_abs.collidepoint(mx, my)
+            
+            # Dessiner le bouton sur la surface locale
+            theme.draw_button(content_surf, button_rect_local, key_name, is_hovered=is_hovered, color_normal=color_normal)
+            
+            # Stocker le rect absolu pour la gestion des clics
+            if abs_y + item_height > content_y_start and abs_y < content_y_start + content_height:
+                button_rects[action] = button_rect_abs
             
             current_y += item_height
+            
+    # Blit la partie visible
+    visible_rect = pygame.Rect(0, game_state['options_scroll_offset'], screen_width - 100, content_height)
+    screen.blit(content_surf, (50, content_y_start), visible_rect)
     
     game_state['options_keybind_rects'] = button_rects
     
@@ -725,28 +766,22 @@ def draw_options_menu(screen, game_state):
     bottom_y = screen_height - 80
     
     # Bouton Retour
-    back_text = font_item.render("Retour", True, (255, 255, 255))
-    back_rect = pygame.Rect(screen_width // 2 - 200, bottom_y, 120, 40)
-    pygame.draw.rect(screen, (80, 80, 80), back_rect, border_radius=8)
-    pygame.draw.rect(screen, (150, 150, 150), back_rect, 2, border_radius=8)
-    back_text_rect = back_text.get_rect(center=back_rect.center)
-    screen.blit(back_text, back_text_rect)
+    back_rect = pygame.Rect(screen_width // 2 - 200, bottom_y, 150, 40)
+    is_back_hovered = back_rect.collidepoint(mx, my)
+    theme.draw_button(screen, back_rect, "Retour", is_hovered=is_back_hovered)
     game_state['options_back_rect'] = back_rect
     
     # Bouton Reset
-    reset_text = font_item.render("Réinitialiser", True, (255, 255, 255))
-    reset_rect = pygame.Rect(screen_width // 2 + 80, bottom_y, 140, 40)
-    pygame.draw.rect(screen, (150, 60, 60), reset_rect, border_radius=8)
-    pygame.draw.rect(screen, (200, 100, 100), reset_rect, 2, border_radius=8)
-    reset_text_rect = reset_text.get_rect(center=reset_rect.center)
-    screen.blit(reset_text, reset_text_rect)
+    reset_rect = pygame.Rect(screen_width // 2 + 50, bottom_y, 150, 40)
+    is_reset_hovered = reset_rect.collidepoint(mx, my)
+    theme.draw_button(screen, reset_rect, "Réinitialiser", is_hovered=is_reset_hovered, color_normal=theme.COLOR_DANGER, color_hover=(220, 100, 100))
     game_state['options_reset_rect'] = reset_rect
     
     # Instructions
     if game_state['waiting_for_key']:
-        hint_text = font_item.render("Appuyez sur ESC pour annuler", True, (200, 200, 200))
+        hint_text = theme.FONT_SMALL.render("Appuyez sur ESC pour annuler", True, theme.COLOR_TEXT_DIM)
     else:
-        hint_text = font_item.render("Cliquez sur une touche pour la modifier • Molette pour défiler", True, (150, 150, 150))
+        hint_text = theme.FONT_SMALL.render("Cliquez sur une touche pour la modifier • Molette pour défiler", True, theme.COLOR_TEXT_DIM)
     hint_rect = hint_text.get_rect(center=(screen_width // 2, bottom_y + 55))
     screen.blit(hint_text, hint_rect)
 

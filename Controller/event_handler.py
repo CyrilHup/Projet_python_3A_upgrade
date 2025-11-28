@@ -255,27 +255,22 @@ def handle_events(event, game_state):
 
         elif event.key in (pygame.K_PLUS, pygame.K_KP_PLUS):
             camera.set_zoom(camera.zoom * 1.1)
-            debug_print("[GUI] Zoom avant via +")
 
         elif event.key in (pygame.K_MINUS, pygame.K_KP_MINUS):
             camera.set_zoom(camera.zoom / 1.1)
-            debug_print("[GUI] Zoom arrière via -")
 
         elif event.key == pygame.K_m:
             camera.zoom_out_to_global()
-            debug_print("[GUI] m => Camera zoom out global.")
 
         elif event.key == pygame.K_ESCAPE:
             game_state['pause_menu_active'] = not game_state.get('pause_menu_active', False)
             game_state['paused'] = game_state['pause_menu_active']
-            debug_print("[GUI] ESC => Pause menu toggled.")
 
         elif event.key == pygame.K_F2:
             game_state['show_player_info'] = not game_state['show_player_info']
 
         elif event.key == pygame.K_F4:
             game_state['show_unit_and_building_health_bars'] = not game_state.get('show_unit_and_building_health_bars', False)
-            debug_print(f"[GUI] F4 => show_unit_and_building_health_bars={game_state['show_unit_and_building_health_bars']}")
 
         elif event.key == pygame.K_j:
             screen = game_state['screen']
@@ -292,7 +287,6 @@ def handle_events(event, game_state):
             game_state['screen_width'] = screen.get_width()
             game_state['screen_height'] = screen.get_height()
             game_state['force_full_redraw'] = True
-            debug_print(f"[GUI] J => Toggle fullscreen: {game_state['fullscreen']}")
 
         else:
             # Mouvement terminal si mode Terminal or Both
@@ -465,11 +459,9 @@ def handle_events(event, game_state):
 
         elif event.button == 4:
             camera.set_zoom(camera.zoom * 1.1)
-            debug_print("[GUI] molette haut => zoom avant")
 
         elif event.button == 5:
             camera.set_zoom(camera.zoom / 1.1)
-            debug_print("[GUI] molette bas => zoom arrière")
 
     elif event.type == pygame.MOUSEMOTION:
         if game_state['minimap_dragging']:

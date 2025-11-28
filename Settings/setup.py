@@ -24,7 +24,7 @@ os.makedirs(ASSETS_DIRECTORY, exist_ok=True)
 @dataclass(frozen=True)
 class GameConstants:
     """Configuration globale du jeu (immutable)."""
-    game_speed: int = 5
+    game_speed: int = 50
     fps_draw_limiter: int = 60
     building_time_reduction: float = 0.75
     building_zone_offset: int = 1
