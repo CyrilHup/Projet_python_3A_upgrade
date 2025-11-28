@@ -346,6 +346,14 @@ class GameMap:
             # Store current bot modes before saving
             self.game_state['bot_modes'] = self.game_state.get('bot_modes', ['economique'] * len(self.players))
             
+            # Convert players_target from Team objects to team IDs for serialization
+            players_target = self.game_state.get('players_target', [])
+            if players_target:
+                self.game_state['players_target_ids'] = [
+                    (target.teamID if target is not None else None) 
+                    for target in players_target
+                ]
+            
             gui_state = {
                 'screen': self.game_state.pop('screen', None),
                 'minimap_panel_sprite': self.game_state.pop('minimap_panel_sprite', None),
@@ -353,7 +361,8 @@ class GameMap:
                 'minimap_entities_surface': self.game_state.pop('minimap_entities_surface', None),
                 'player_selection_surface': self.game_state.pop('player_selection_surface', None),
                 'train_button_rects': self.game_state.pop('train_button_rects', {}),
-                'pause_menu_button_rects': self.game_state.pop('pause_menu_button_rects', {})
+                'pause_menu_button_rects': self.game_state.pop('pause_menu_button_rects', {}),
+                'players_target': self.game_state.pop('players_target', None)
             }
 
         try:
@@ -411,6 +420,19 @@ class GameMap:
                 self.game_state['old_resources'] = {
                     p.teamID: p.resources.copy() for p in self.players
                 }
+                
+                # Restore players_target from saved team IDs
+                players_target_ids = self.game_state.get('players_target_ids', [])
+                if players_target_ids:
+                    players_target = []
+                    for target_id in players_target_ids:
+                        if target_id is not None and 0 <= target_id < len(self.players):
+                            players_target.append(self.players[target_id])
+                        else:
+                            players_target.append(None)
+                    self.game_state['players_target'] = players_target
+                else:
+                    self.game_state['players_target'] = [None] * len(self.players)
 
             # Reassign team IDs to match player positions
             for i, player in enumerate(self.players):

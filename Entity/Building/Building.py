@@ -193,15 +193,22 @@ class Building(Entity):
             self.training_progress = max(0.0, min(1.0, 1.0 - (self.current_training_time_left / total_time)))
 
             if self.current_training_time_left <= 0:
-                self.spawn_trained_unit(self.current_training_unit, game_map, team)
+                self.spawn_trained_unit(self.current_training_unit, game_map)
                 self.current_training_unit = None
                 self.current_training_time_left = 0
                 self.training_progress = 0.0
 
-    def spawn_trained_unit(self, unit_name, game_map, team):
+    def spawn_trained_unit(self, unit_name, game_map):
         """
         Once the unit is fully trained, find a free adjacent tile, place the unit, 
         and make it move randomly away from the building.
+        
+        Parameters
+        ----------
+        unit_name : str
+            Name of the unit type to spawn (e.g., 'villager', 'archer').
+        game_map : GameMap
+            The game map instance to spawn the unit on.
         """
         unit_class = UNIT_CLASSES[unit_name]
         spawn_tile = self.find_adjacent_tile(game_map)
@@ -305,7 +312,7 @@ class Building(Entity):
             self.training_progress = max(0.0, min(1.0, 1.0 - (self.current_training_time_left / total_time)))
 
             if self.current_training_time_left <= 0:
-                self.spawn_trained_unit(self.current_training_unit, game_map, self.team)
+                self.spawn_trained_unit(self.current_training_unit, game_map)
                 self.current_training_unit = None
                 self.current_training_time_left = 0
                 self.training_progress = 0.0

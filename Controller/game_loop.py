@@ -206,7 +206,14 @@ def load_temp_save_if_exists(game_map, game_state):
         players = game_map.players
         game_state['players'] = players
         game_state['selected_player'] = players[0] if players else None
-        game_state['players_target'] = [None for _ in range(len(players))]
+        
+        # Restaurer players_target depuis la sauvegarde (déjà converti par Map.load_map)
+        saved_players_target = game_map.game_state.get('players_target')
+        if saved_players_target and len(saved_players_target) == len(players):
+            game_state['players_target'] = saved_players_target
+        else:
+            game_state['players_target'] = [None for _ in range(len(players))]
+        
         game_state['team_colors'] = generate_team_colors(len(players))
         game_state['old_resources'] = {p.teamID: p.resources.copy() for p in players}
         game_state['force_full_redraw'] = True
@@ -500,6 +507,17 @@ def game_loop(screen, game_map, screen_width, screen_height, players):
             game_state['team_colors'] = generate_team_colors(len(players))
             game_state['force_full_redraw'] = True
             game_state['player_selection_updated'] = True
+            
+            # Restaurer players_target depuis la sauvegarde ou réinitialiser
+            saved_players_target = game_map.game_state.get('players_target')
+            if saved_players_target and len(saved_players_target) == len(players):
+                game_state['players_target'] = saved_players_target
+            else:
+                game_state['players_target'] = [None for _ in range(len(players))]
+            
+            # Restaurer bot_modes depuis la sauvegarde
+            bot_modes = game_map.game_state.get('bot_modes', ['economique'] * len(players))
             bots, bot_modes = create_bots(players, game_map, bot_modes)
+            game_map.game_state['bot_modes'] = bot_modes
 
     return "done"

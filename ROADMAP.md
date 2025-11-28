@@ -19,7 +19,7 @@
 
 ## 🔴 PHASE 1 : BUGS CRITIQUES (Priorité Maximale) ✅ TERMINÉE
 
-> Ces bugs cassent le fonctionnement du jeu ou des bots
+> Ces bugs cassent le fonctionnement du jeu ou des bots - Tous corrigés !
 
 ### 1.1 Chaînes d'Actions/Décisions des Bots
 
@@ -37,14 +37,14 @@
 |---|-------|---------|----------|--------|
 | 1.2.1 | ✅ Corriger `seekRepair()` - condition inversée `hp < max_hp` → `hp >= max_hp` | `Entity/Unit/Villager.py` | ~139-145 | ✅ |
 | 1.2.2 | ✅ Fixer `seekCollect()` - vérifier carry avant passage à 'stock' | `Entity/Unit/Villager.py` | ~86-90 | ✅ |
-| 1.2.3 | ⬜ Corriger `spawn_trained_unit()` - passe `self.team` (int) au lieu de l'objet Team | `Entity/Building/Building.py` | ~137 | 🟠 |
+| 1.2.3 | ✅ Corriger `spawn_trained_unit()` - paramètre team inutile supprimé | `Entity/Building/Building.py` | ~137 | ✅ |
 | 1.2.4 | ✅ Supprimer méthode `display_path()` dupliquée | `Entity/Unit/Unit.py` | ~125-135 | ✅ |
 
 ### 1.3 Bugs de Synchronisation/État
 
 | # | Tâche | Fichier | Ligne(s) | Statut |
 |---|-------|---------|----------|--------|
-| 1.3.1 | ⬜ Restaurer l'état des bots lors du chargement de sauvegarde | `Controller/game_loop.py` | ~144-150 | 🟠 |
+| 1.3.1 | ✅ Restaurer l'état des bots lors du chargement de sauvegarde | `Controller/game_loop.py` | ~144-150 | ✅ |
 | 1.3.2 | ✅ Nettoyer `resources` dict quand une ressource est supprimée | `Models/Map.py` | ~156-160 | ✅ |
 
 ---
@@ -118,7 +118,7 @@
 
 ## 🧹 PHASE 4 : NETTOYAGE LEGACY CODE ✅ COMPLÈTE
 
-> Supprimer le code mort et moderniser
+> Supprimer le code mort et moderniser - Terminé avec dataclasses et type hints
 
 ### 4.1 Code Mort à Supprimer
 
@@ -143,10 +143,10 @@
 
 | # | Tâche | Description | Statut |
 |---|-------|-------------|--------|
-| 4.3.1 | ⬜ Convertir configs en `dataclasses` | setup.py, sprite_config, etc. | |
-| 4.3.2 | ⬜ Ajouter type hints sur les fonctions principales | Bot, Unit, Building, Map | |
-| 4.3.3 | ⬜ Utiliser `frozenset` quand collections immuables | Optimisation mémoire | |
-| 4.3.4 | ⬜ Ajouter docstrings numpy-style | Documentation des modules | |
+| 4.3.1 | ✅ Convertir configs en `dataclasses` | setup.py - GameConstants, UnitConstants, MapConfig, MinimapConfig, HealthBarConfig | ✅ |
+| 4.3.2 | ✅ Ajouter type hints sur les fonctions principales | Entity.py, Resources.py avec annotations de type complètes | ✅ |
+| 4.3.3 | ✅ Utiliser `frozenset` quand collections immuables | Dataclasses frozen=True, Tuple pour VALID_LEVELS/VALID_BOT_MODES | ✅ |
+| 4.3.4 | ✅ Ajouter docstrings numpy-style | Documentation des modules Entity.py et Resources.py | ✅ |
 
 ---
 
