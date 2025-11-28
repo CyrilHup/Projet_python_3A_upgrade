@@ -13,6 +13,12 @@ zoom_cache = {}
 MAX_ZOOM_CACHE_PER_SPRITE = 200  # Augmenté pour moins de recalculs
 MAX_TOTAL_CACHE_SIZE = 2000  # Limite globale du cache
 
+# Cache par niveau de zoom (optimisation 2.1.5)
+# Chaque niveau de zoom a son propre cache LRU
+_zoom_level_cache = OrderedDict()
+MAX_ZOOM_LEVELS = 10  # Nombre max de niveaux de zoom à garder en cache
+MAX_SPRITES_PER_ZOOM_LEVEL = 300  # Sprites par niveau
+
 gui_elements = {}
 gui_cache = {}
 
@@ -508,19 +514,43 @@ def load_sprites(screen, screen_width, screen_height, show_progress=False):
     save_sprites_cache(sprites, gui_elements, cache_path)
     
 def get_scaled_sprite(name, category, zoom, state, direction, frame_id, variant):
+    """
+    Récupère un sprite scalé avec un cache LRU optimisé par niveau de zoom.
+    Le zoom est quantifié pour réduire le nombre d'entrées de cache.
+    """
+    global _zoom_level_cache
+    
     # Quantifier le zoom pour réduire les variations de cache (par pas de 0.05)
     quantized_zoom = round(zoom * 20) / 20
     
-    if name not in zoom_cache:
-        zoom_cache[name] = OrderedDict()
+    # Clé du niveau de zoom
+    zoom_key = quantized_zoom
     
-    cache_key = (quantized_zoom, state, frame_id, variant, direction)
-    if cache_key in zoom_cache[name]:
-        zoom_cache[name].move_to_end(cache_key)
-        return zoom_cache[name][cache_key]
+    # Initialiser le cache pour ce niveau de zoom si nécessaire
+    if zoom_key not in _zoom_level_cache:
+        # Supprimer les niveaux de zoom les moins utilisés si nécessaire
+        if len(_zoom_level_cache) >= MAX_ZOOM_LEVELS:
+            # Trouver le niveau de zoom le moins récemment utilisé
+            oldest_zoom = next(iter(_zoom_level_cache))
+            del _zoom_level_cache[oldest_zoom]
+        
+        _zoom_level_cache[zoom_key] = OrderedDict()
+    
+    # Clé du sprite dans ce niveau de zoom
+    sprite_key = (name, state, frame_id, variant, direction)
+    
+    # Vérifier si le sprite est en cache pour ce niveau de zoom
+    zoom_level = _zoom_level_cache[zoom_key]
+    if sprite_key in zoom_level:
+        zoom_level.move_to_end(sprite_key)
+        # Déplacer le niveau de zoom à la fin pour le marquer comme récemment utilisé
+        _zoom_level_cache.move_to_end(zoom_key)
+        return zoom_level[sprite_key]
 
+    # Sprite non en cache, le générer
     if state not in sprites[category][name]:
         state = 'idle'
+    
     try:
         if category == 'buildings':
             frame_id = frame_id % len(sprites[category][name][state])
@@ -536,14 +566,28 @@ def get_scaled_sprite(name, category, zoom, state, direction, frame_id, variant)
     scaled_width = max(1, int(original_image.get_width() * quantized_zoom))
     scaled_height = max(1, int(original_image.get_height() * quantized_zoom))
 
-    # Utiliser scale au lieu de smoothscale pour plus de rapidité (moins lisse mais plus rapide)
+    # Utiliser scale au lieu de smoothscale pour plus de rapidité
     scaled_image = pygame.transform.scale(original_image, (scaled_width, scaled_height))
-    zoom_cache[name][cache_key] = scaled_image
-    zoom_cache[name].move_to_end(cache_key)
+    
+    # Ajouter au cache
+    zoom_level[sprite_key] = scaled_image
+    zoom_level.move_to_end(sprite_key)
 
-    if len(zoom_cache[name]) > MAX_ZOOM_CACHE_PER_SPRITE:
-        zoom_cache[name].popitem(last=False)
+    # Nettoyer si le cache de ce niveau de zoom est trop grand
+    while len(zoom_level) > MAX_SPRITES_PER_ZOOM_LEVEL:
+        zoom_level.popitem(last=False)
+    
+    # Déplacer le niveau de zoom à la fin
+    _zoom_level_cache.move_to_end(zoom_key)
+    
     return scaled_image
+
+
+def clear_zoom_cache():
+    """Vide le cache des sprites zoomés."""
+    global _zoom_level_cache, zoom_cache
+    _zoom_level_cache.clear()
+    zoom_cache.clear()
 
 
 def get_scaled_gui(ui_name, variant=0, target_width=None, target_height=None):

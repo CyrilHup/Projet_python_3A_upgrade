@@ -27,7 +27,7 @@ def is_resource_shortage_condition(bot):
     return bot.get_resource_shortage() 
 
 def are_buildings_needed_condition(bot):
-    return bot.check_building_needs()
+    return len(bot.check_building_needs()) > 0
 
 def is_army_below_threshold_condition(bot):
     return bot.get_military_unit_count(bot.team) < 15 # Reduced threshold for example
@@ -62,11 +62,12 @@ def repair_buildings_action(bot):
     if not critical_buildings:
         return False
     
-    # Trouver des villageois disponibles
+    # Trouver des villageois disponibles (task est None quand idle)
+    from Entity.Unit import Villager
     available_villagers = [
         unit for unit in bot.team.units 
-        if hasattr(unit, 'task') and (unit.task is None or unit.task == 'idle')
-        and hasattr(unit, 'set_task')
+        if isinstance(unit, Villager) and unit.isAlive()
+        and (unit.task is None or unit.state == 'idle')
     ]
     
     if not available_villagers:

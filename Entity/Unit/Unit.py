@@ -31,6 +31,10 @@ class Unit(Entity):
         self.attack_target = None
         self.attack_timer = 0
         self.follow_timer = 0
+        self.pathfinding_attempts = 0  # Compteur de tentatives de pathfinding
+        self.max_pathfinding_attempts = 5  # Nombre max de tentatives avant abandon
+        self.attack_timer = 0
+        self.follow_timer = 0
         
         self.speed = speed
         self.training_time = training_time
@@ -162,7 +166,8 @@ class Unit(Entity):
                 )
                 distance = math.dist(closest_point, (self.x, self.y)) - self.attack_range          
             if distance <= 0 :
-
+                # Réinitialiser le compteur de pathfinding quand on attaque
+                self.pathfinding_attempts = 0
                 self.state = 'attack'
                 self.direction = get_direction(get_snapped_angle((self.x, self.y), (self.attack_target.x, self.attack_target.y))) 
                 if self.attack_timer == 0:
@@ -183,15 +188,32 @@ class Unit(Entity):
                 if isinstance(self.attack_target, Unit):
                     if self.path:
                         self.path = [self.path[0]] + a_star((self.x, self.y), (self.attack_target.x,self.attack_target.y), game_map)
+                        self.pathfinding_attempts = 0  # Réinitialiser si on a un chemin
                     else:
                         self.set_destination((self.attack_target.x,self.attack_target.y), game_map)
+                        if not self.path:
+                            self.pathfinding_attempts += 1
+                            # Abandonner la cible si trop de tentatives échouées
+                            if self.pathfinding_attempts >= self.max_pathfinding_attempts:
+                                self.attack_target = None
+                                self.pathfinding_attempts = 0
+                        else:
+                            self.pathfinding_attempts = 0
                 else:
                     if not self.path:
                         self.set_destination((self.attack_target.x,self.attack_target.y), game_map)
+                        if not self.path:
+                            self.pathfinding_attempts += 1
+                            if self.pathfinding_attempts >= self.max_pathfinding_attempts:
+                                self.attack_target = None
+                                self.pathfinding_attempts = 0
+                        else:
+                            self.pathfinding_attempts = 0
 
                 self.attack_timer = 0
         else: 
             self.attack_target = None
+            self.pathfinding_attempts = 0
 
     # ---------------- Death Logic ----------------
     def death(self, game_map, dt):

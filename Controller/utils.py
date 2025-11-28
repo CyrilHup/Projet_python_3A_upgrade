@@ -5,6 +5,63 @@ from Settings.setup import *
 import pygame
 
 
+# ==================== Optimisations de calcul de distance ====================
+
+def distance_squared(x1, y1, x2, y2):
+    """
+    Calcule la distance au carré entre deux points.
+    Plus rapide que distance() car évite la racine carrée.
+    Utile pour les comparaisons de distance.
+    """
+    dx = x2 - x1
+    dy = y2 - y1
+    return dx * dx + dy * dy
+
+def distance_manhattan(x1, y1, x2, y2):
+    """
+    Calcule la distance de Manhattan entre deux points.
+    Plus rapide que la distance euclidienne pour les heuristiques.
+    """
+    return abs(x2 - x1) + abs(y2 - y1)
+
+def is_within_distance(x1, y1, x2, y2, max_dist):
+    """
+    Vérifie si deux points sont à une distance inférieure à max_dist.
+    Optimisé en utilisant la distance au carré.
+    """
+    return distance_squared(x1, y1, x2, y2) <= max_dist * max_dist
+
+def find_nearest_entity(x, y, entities, max_distance=None):
+    """
+    Trouve l'entité la plus proche d'une position.
+    
+    Args:
+        x, y: Position de référence
+        entities: Itérable d'entités avec attributs x, y
+        max_distance: Distance maximale (optionnel)
+    
+    Returns:
+        L'entité la plus proche ou None
+    """
+    if not entities:
+        return None
+    
+    nearest = None
+    min_dist_sq = float('inf')
+    max_dist_sq = max_distance * max_distance if max_distance else float('inf')
+    
+    for entity in entities:
+        dist_sq = distance_squared(x, y, entity.x, entity.y)
+        if dist_sq < min_dist_sq and dist_sq <= max_dist_sq:
+            min_dist_sq = dist_sq
+            nearest = entity
+    
+    return nearest
+
+
+# ==================== Fonctions de conversion de coordonnées ====================
+
+
 def to_isometric(x, y, tile_width, tile_height):
     iso_x = (x - y) * (tile_width / 2)
     iso_y = (x + y) * (tile_height / 2)

@@ -15,7 +15,11 @@ from random import *
 from AiUtils.aStar import a_star
 from Controller.Decisonnode import * # Import DecisionNode and trees
 
+
 class Bot:
+    # Cache TTL for is_under_attack() in seconds
+    UNDER_ATTACK_CACHE_TTL = 0.5
+    
     def __init__(self, team, game_map, players, mode, difficulty='medium'):
         self.team = team
         self.game_map = game_map
@@ -26,6 +30,10 @@ class Bot:
         self.players_target = game_map.game_state.get('players_target') if game_map.game_state else [None] * len(players)
 
         self.attacking_enemies = None
+        
+        # Cache for is_under_attack()
+        self._under_attack_cache = None
+        self._under_attack_cache_time = 0
 
         self.priority = None
         self.ATTACK_RADIUS = 5  # Rayon d'attaque pour détecter les ennemis
@@ -96,7 +104,9 @@ class Bot:
 
             # Si on a besoin de nourriture (Farm)
             if resource_type is Farm:
-                available_farms = [farm for farm in self.team.buildings if isinstance(farm, Farm)]
+                # Ne prendre que les fermes construites (pas en construction)
+                available_farms = [farm for farm in self.team.buildings 
+                                   if isinstance(farm, Farm) and farm.isBuilt() and farm.isAlive()]
                 if available_farms:
                     villager.set_target(available_farms[0])
                     continue
@@ -164,41 +174,50 @@ class Bot:
             
         closest_distance = float("inf")
         closest_entity = None
-        keeps = [keep for keep in enemy_team.buildings if isinstance(keep, Keep)]
-        targets=[unit for unit in enemy_team.units if not isinstance(unit,Villager)]
+        keeps = [keep for keep in enemy_team.buildings if isinstance(keep, Keep) and keep.isAlive()]
+        
+        # Chercher d'abord parmi les unités militaires ennemies (exclure les villageois)
+        military_targets = [enemy for enemy in enemy_team.units 
+                          if not isinstance(enemy, Villager) and enemy.isAlive()]
 
-        for enemy in targets:
+        for enemy in military_targets:
             dist = math.dist((unit.x, unit.y), (enemy.x, enemy.y))
             if dist < closest_distance:
                 closest_distance = dist
                 closest_entity = enemy
-        if attack_mode and closest_entity==None:
-            targets=[unit for unit in enemy_team.units if isinstance(unit,Villager)]
-            for enemy in targets:
+        
+        # Si pas de cible militaire et en mode attaque, chercher villageois et bâtiments
+        if attack_mode and closest_entity is None:
+            villager_targets = [enemy for enemy in enemy_team.units 
+                               if isinstance(enemy, Villager) and enemy.isAlive()]
+            for enemy in villager_targets:
                 dist = math.dist((unit.x, unit.y), (enemy.x, enemy.y))
-                if attack_mode or not isinstance(enemy,Villager):
-                    if dist < closest_distance:
-                        closest_distance = dist
-                        closest_entity = enemy
-            for enemy_building in enemy_team.buildings:
-                dist = math.dist((unit.x, unit.y), (enemy_building.x, enemy_building.y))
                 if dist < closest_distance:
                     closest_distance = dist
-                    closest_entity = enemy_building
-
-        if attack_mode:
-            for enemy in keeps:
-                dist = math.dist((unit.x, unit.y), (enemy.x, enemy.y))
-                if attack_mode or not isinstance(enemy,Villager):
+                    closest_entity = enemy
+            
+            for enemy_building in enemy_team.buildings:
+                if enemy_building.isAlive():
+                    dist = math.dist((unit.x, unit.y), (enemy_building.x, enemy_building.y))
                     if dist < closest_distance:
                         closest_distance = dist
-                        closest_entity = enemy
-        if closest_entity!=None:
-            if keeps!=[] and attack_mode:
-                for keep in keeps:
-                    dist=math.dist((keep.x,keep.y),(closest_entity.x,closest_entity.y))
-                    if dist<keep.attack_range:
-                        closest_entity=keep
+                        closest_entity = enemy_building
+
+        # En mode attaque, prioriser les Keeps
+        if attack_mode and keeps:
+            for keep in keeps:
+                dist = math.dist((unit.x, unit.y), (keep.x, keep.y))
+                if dist < closest_distance:
+                    closest_distance = dist
+                    closest_entity = keep
+        
+        # Si la cible est proche d'un keep ennemi, cibler le keep d'abord
+        if closest_entity is not None and keeps and attack_mode:
+            for keep in keeps:
+                dist = math.dist((keep.x, keep.y), (closest_entity.x, closest_entity.y))
+                if dist < keep.attack_range:
+                    closest_entity = keep
+                    break
 
         unit.set_target(closest_entity)
         return unit.attack_target is not None
@@ -381,34 +400,66 @@ class Bot:
         return False
 
     def is_under_attack(self):
-        """Vérifie si l'équipe est attaquée - VERSION OPTIMISÉE
+        """Vérifie si l'équipe est attaquée - VERSION OPTIMISÉE AVEC CACHE TTL
         
         Returns:
             bool: True si des ennemis sont détectés près des bâtiments, False sinon
         """
+        current_time = time.time()
+        
+        # Vérifier si le cache est encore valide
+        if (self._under_attack_cache is not None and 
+            current_time - self._under_attack_cache_time < Bot.UNDER_ATTACK_CACHE_TTL):
+            return self._under_attack_cache
+        
         my_team_id = self.team.teamID
         
-        # Au lieu d'itérer sur toute la zone, vérifier autour des bâtiments
-        check_positions = set()
-        for building in self.team.buildings:
-            bx, by = int(building.x), int(building.y)
-            # Vérifier dans un rayon de 5 autour de chaque bâtiment
-            for dx in range(-5, 6):
-                for dy in range(-5, 6):
-                    check_positions.add((bx + dx, by + dy))
-        
-        # Limiter le nombre de positions à vérifier
-        for tile in check_positions:
-            entities = self.game_map.grid.get(tile)
-            if entities:
-                for entity in entities:
+        # Utiliser le spatial hash si disponible
+        if hasattr(self.game_map, 'spatial_hash'):
+            for building in self.team.buildings:
+                # Chercher les entités proches de chaque bâtiment
+                nearby = self.game_map.get_entities_in_area(building.x, building.y, 5)
+                for entity in nearby:
                     if isinstance(entity, Unit) and entity.team != my_team_id:
-                        # Cache les ennemis détectés pour gather_units_for_defense
-                        self.attacking_enemies = self._get_attacking_enemies(check_positions, my_team_id)
+                        self.attacking_enemies = self._get_attacking_enemies_optimized(my_team_id)
+                        self._under_attack_cache = True
+                        self._under_attack_cache_time = current_time
                         return True
+        else:
+            # Fallback: méthode originale
+            check_positions = set()
+            for building in self.team.buildings:
+                bx, by = int(building.x), int(building.y)
+                for dx in range(-5, 6):
+                    for dy in range(-5, 6):
+                        check_positions.add((bx + dx, by + dy))
+            
+            for tile in check_positions:
+                entities = self.game_map.grid.get(tile)
+                if entities:
+                    for entity in entities:
+                        if isinstance(entity, Unit) and entity.team != my_team_id:
+                            self.attacking_enemies = self._get_attacking_enemies(check_positions, my_team_id)
+                            self._under_attack_cache = True
+                            self._under_attack_cache_time = current_time
+                            return True
         
         self.attacking_enemies = []
+        self._under_attack_cache = False
+        self._under_attack_cache_time = current_time
         return False
+    
+    def _get_attacking_enemies_optimized(self, my_team_id):
+        """Récupère la liste des ennemis attaquant en utilisant spatial hash."""
+        attacking_enemies = []
+        for building in self.team.buildings:
+            nearby = self.game_map.get_entities_in_area(building.x, building.y, 5)
+            for entity in nearby:
+                if isinstance(entity, Unit) and entity.team != my_team_id:
+                    attacking_enemies.append(entity)
+                    if len(attacking_enemies) >= 10:
+                        return attacking_enemies
+        return attacking_enemies
     
     def _get_attacking_enemies(self, check_positions, my_team_id):
         """Récupère la liste des ennemis attaquant (appelé après is_under_attack)"""
@@ -441,6 +492,11 @@ class Bot:
         """Rassemble les unités militaires pour défendre contre les ennemis détectés"""
         # Utiliser la liste des ennemis mise en cache par is_under_attack()
         attacking_enemies = getattr(self, 'attacking_enemies', [])
+        if not attacking_enemies:
+            return
+
+        # Filtrer les ennemis morts
+        attacking_enemies = [e for e in attacking_enemies if e.isAlive()]
         if not attacking_enemies:
             return
 
@@ -537,14 +593,13 @@ class Bot:
 
             for unit in attack_composition:
                 if not isinstance(unit, Villager):
-                    if unit.idle:
-                        target = self.find_target_for_unit(unit)
-                        if target:
-                            unit.set_target(target)
-                    elif unit.target:
-                        unit.attack()
-                    else:
-                        unit.setIdle()
+                    # Vérifier si l'unité est idle (pas de cible d'attaque et pas de path)
+                    is_idle = (not unit.attack_target or not unit.attack_target.isAlive()) and not unit.path
+                    if is_idle:
+                        # Chercher une cible parmi les ennemis
+                        for enemy_team in self.enemies:
+                            if self.search_for_target(unit, enemy_team, True):
+                                break
 
     def check_building_needs(self):
         """VERSION OPTIMISÉE - Vérifie quels bâtiments sont nécessaires"""

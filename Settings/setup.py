@@ -292,7 +292,8 @@ villager_tasks: Dict[str, str] = {
     "attack": "attack_target",
     "collect": "collect_target",
     "build": "build_target",
-    "stock": "stock_target"
+    "stock": "stock_target",
+    "repair": "build_target"  # repair utilise build_target comme cible
 }
 
 sprite_config = {

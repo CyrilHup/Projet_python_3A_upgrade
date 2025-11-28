@@ -294,7 +294,7 @@ class Building(Entity):
         if self.hp < self.max_hp:
             for builder in self.builders:
                 if builder.task != 'repair':  
-                    builder.set_task('repair', builder)
+                    builder.set_task('repair', self)
             return 
 
         self.dynamicBuildTime = self.get_buildTime(num_builders)

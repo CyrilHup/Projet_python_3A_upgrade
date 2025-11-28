@@ -4,7 +4,7 @@ import os
 import pickle
 import time
 import shutil
-from collections import Counter
+from collections import Counter, defaultdict
 from datetime import datetime
 from Entity.Building import *
 from Entity.Unit import *
@@ -13,6 +13,77 @@ from Entity.Resource.Gold import Gold
 from Entity.Resource.Tree import Tree
 from Settings.setup import BUILDING_ZONE_OFFSET, TILE_SIZE, MAP_WIDTH, MAP_HEIGHT, NUM_GOLD_TILES, NUM_WOOD_TILES, NUM_FOOD_TILES, GOLD_SPAWN_MIDDLE, SAVE_DIRECTORY
 from Controller.terminal_display_debug import debug_print
+
+
+class SpatialHash:
+    """
+    Spatial hashing for fast entity lookups.
+    Divides the map into cells and tracks which entities are in each cell.
+    """
+    def __init__(self, cell_size=10):
+        self.cell_size = cell_size
+        self.cells = defaultdict(set)
+        self.entity_cells = {}  # Maps entity_id to set of cells it occupies
+    
+    def _get_cell(self, x, y):
+        """Get the cell coordinates for a position."""
+        return (int(x) // self.cell_size, int(y) // self.cell_size)
+    
+    def _get_cells_for_entity(self, entity):
+        """Get all cells that an entity occupies."""
+        cells = set()
+        x, y = int(entity.x - entity.size/2), int(entity.y - entity.size/2)
+        for dx in range(entity.size + 1):
+            for dy in range(entity.size + 1):
+                cells.add(self._get_cell(x + dx, y + dy))
+        return cells
+    
+    def add(self, entity):
+        """Add an entity to the spatial hash."""
+        cells = self._get_cells_for_entity(entity)
+        self.entity_cells[entity.entity_id] = cells
+        for cell in cells:
+            self.cells[cell].add(entity)
+    
+    def remove(self, entity):
+        """Remove an entity from the spatial hash."""
+        if entity.entity_id in self.entity_cells:
+            for cell in self.entity_cells[entity.entity_id]:
+                self.cells[cell].discard(entity)
+                if not self.cells[cell]:
+                    del self.cells[cell]
+            del self.entity_cells[entity.entity_id]
+    
+    def update(self, entity):
+        """Update entity position in spatial hash."""
+        self.remove(entity)
+        self.add(entity)
+    
+    def get_nearby(self, x, y, radius=1):
+        """Get all entities within a radius (in cells) of a position."""
+        center_cell = self._get_cell(x, y)
+        nearby = set()
+        for dx in range(-radius, radius + 1):
+            for dy in range(-radius, radius + 1):
+                cell = (center_cell[0] + dx, center_cell[1] + dy)
+                nearby.update(self.cells.get(cell, set()))
+        return nearby
+    
+    def get_in_rect(self, min_x, min_y, max_x, max_y):
+        """Get all entities within a rectangle."""
+        min_cell = self._get_cell(min_x, min_y)
+        max_cell = self._get_cell(max_x, max_y)
+        entities = set()
+        for cx in range(min_cell[0], max_cell[0] + 1):
+            for cy in range(min_cell[1], max_cell[1] + 1):
+                entities.update(self.cells.get((cx, cy), set()))
+        return entities
+    
+    def clear(self):
+        """Clear all entities from the spatial hash."""
+        self.cells.clear()
+        self.entity_cells.clear()
+
 
 class GameMap:
     def __init__(self, grid_width, grid_height, center_gold_flag, players, generate=True):
@@ -31,9 +102,34 @@ class GameMap:
         self.height = grid_height
         self.terminal_view_x = 0
         self.terminal_view_y = 0
+        
+        # Spatial hash for optimized entity lookups
+        self.spatial_hash = SpatialHash(cell_size=10)
+        
+        # Cache for active entities (invalidated when entities are added/removed)
+        self._active_entities_cache = None
+        self._cache_valid = False
 
         if generate:
             self.generate_map()
+    
+    def _invalidate_cache(self):
+        """Invalidate the active entities cache."""
+        self._cache_valid = False
+        self._active_entities_cache = None
+    
+    def get_active_entities(self):
+        """Get all unique active entities (cached)."""
+        if self._cache_valid and self._active_entities_cache is not None:
+            return self._active_entities_cache
+        
+        active_entities = set()
+        for entities in self.grid.values():
+            active_entities.update(entities)
+        
+        self._active_entities_cache = active_entities
+        self._cache_valid = True
+        return active_entities
             
     def add_entity(self, entity, x, y):
         # Add safety check for team ID
@@ -70,6 +166,11 @@ class GameMap:
 
         entity.x = x + (entity.size - 1) / 2
         entity.y = y + (entity.size - 1) / 2
+        
+        # Add to spatial hash
+        self.spatial_hash.add(entity)
+        self._invalidate_cache()
+        
         if entity.team != None:
             self.players[entity.team].add_member(entity)
             if isinstance(entity, Building):
@@ -100,6 +201,10 @@ class GameMap:
                                         self.resources[clean_pos].remove(entity)
                                     if not self.resources[clean_pos]:
                                         del self.resources[clean_pos]
+                        
+                        # Remove from spatial hash
+                        self.spatial_hash.remove(entity)
+                        self._invalidate_cache()
                         
                         if entity.team != None:
                             self.players[entity.team].remove_member(entity)
@@ -479,11 +584,8 @@ class GameMap:
         del self.projectiles[projectile.id]
 
     def patch(self, dt):
-        # Optimisation : collecter les entités uniques une seule fois
-        # Utiliser un set pour éviter les doublons (une entité peut occuper plusieurs tiles)
-        active_entities = set()
-        for entities in self.grid.values():
-            active_entities.update(entities)
+        # OPTIMISATION: Utiliser le cache des entités actives
+        active_entities = self.get_active_entities()
 
         # Mise à jour des entités actives
         entities_to_deactivate = []
@@ -516,6 +618,21 @@ class GameMap:
             projectile.update(self, dt)
             if projectile.state == '':
                 self.remove_projectile(projectile)
+    
+    def get_entities_in_area(self, x, y, radius):
+        """
+        Get all entities within a radius of a position using spatial hash.
+        More efficient than iterating over the entire grid.
+        """
+        # Convert radius to cell units
+        cell_radius = max(1, int(radius / self.spatial_hash.cell_size) + 1)
+        return self.spatial_hash.get_nearby(x, y, cell_radius)
+    
+    def get_entities_in_rect(self, min_x, min_y, max_x, max_y):
+        """
+        Get all entities within a rectangle using spatial hash.
+        """
+        return self.spatial_hash.get_in_rect(min_x, min_y, max_x, max_y)
 
     def set_game_state(self, game_state):
         self.game_state = game_state

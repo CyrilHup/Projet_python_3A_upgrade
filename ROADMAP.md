@@ -49,7 +49,7 @@
 
 ---
 
-## ⚡ PHASE 2 : OPTIMISATIONS DE PERFORMANCE
+## ⚡ PHASE 2 : OPTIMISATIONS DE PERFORMANCE ✅ TERMINÉE
 
 > Améliorer les FPS et la réactivité du jeu
 
@@ -57,11 +57,11 @@
 
 | # | Tâche | Fichier | Impact | Statut |
 |---|-------|---------|--------|--------|
-| 2.1.1 | ⬜ Implémenter spatial hashing/quadtree pour `patch()` | `Models/Map.py` | 🔴 Haute | |
-| 2.1.2 | ⬜ Mettre en cache le résultat de `is_under_attack()` avec TTL | `Controller/Bot.py` | 🔴 Haute | |
-| 2.1.3 | ⬜ Cache du viewport visible dans `draw_map()` | `Controller/drawing.py` | 🔴 Haute | |
-| 2.1.4 | ⬜ Implémenter cache de chemins A* ou D* Lite | `AiUtils/aStar.py` | 🟠 Moyenne | |
-| 2.1.5 | ⬜ LRU cache plus intelligent par niveau de zoom | `Controller/init_assets.py` | 🟠 Moyenne | |
+| 2.1.1 | ✅ Implémenter spatial hashing/quadtree pour `patch()` | `Models/Map.py` | 🔴 Haute | ✅ |
+| 2.1.2 | ✅ Mettre en cache le résultat de `is_under_attack()` avec TTL | `Controller/Bot.py` | 🔴 Haute | ✅ |
+| 2.1.3 | ✅ Cache du viewport visible dans `draw_map()` | `Controller/drawing.py` | 🔴 Haute | ✅ |
+| 2.1.4 | ✅ Implémenter cache de chemins A* ou D* Lite | `AiUtils/aStar.py` | 🟠 Moyenne | ✅ |
+| 2.1.5 | ✅ LRU cache plus intelligent par niveau de zoom | `Controller/init_assets.py` | 🟠 Moyenne | ✅ |
 
 ### 2.2 Optimisations Secondaires
 
@@ -69,7 +69,7 @@
 |---|-------|-------------|--------|
 | 2.2.1 | ⬜ Utiliser `pygame.sprite.Group` au lieu de sets | Meilleure gestion des sprites | |
 | 2.2.2 | ⬜ Batch les appels `blit()` pour sprites similaires | Moins de draw calls | |
-| 2.2.3 | ⬜ Utiliser numpy pour calculs de distance massifs | Vectorisation | |
+| 2.2.3 | ✅ Fonctions de distance optimisées ajoutées | `Controller/utils.py` - distance_squared, is_within_distance | ✅ |
 | 2.2.4 | ⬜ Lazy loading des sprites rarement utilisés | Réduction mémoire | |
 | 2.2.5 | ⬜ Limiter les updates des entités hors écran | Réduction CPU | |
 

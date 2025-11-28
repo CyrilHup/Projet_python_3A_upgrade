@@ -17,19 +17,46 @@ from Controller.gui import get_scaled_gui
 # Cache global pour les fonts (OPTIMISATION CRITIQUE)
 _font_cache = {}
 
+# Cache pour le viewport (évite les recalculs à chaque frame)
+_viewport_cache = {
+    'camera_state': None,
+    'screen_size': None,
+    'bounds': None,
+    'timestamp': 0
+}
+VIEWPORT_CACHE_TTL = 0.016  # ~1 frame at 60 FPS
+
 def get_cached_font(size):
     """Retourne une font depuis le cache, la crée si nécessaire."""
     if size not in _font_cache:
         _font_cache[size] = pygame.font.Font(None, size)
     return _font_cache[size]
 
-def draw_map(screen, screen_width, screen_height, game_map, camera, players, team_colors, game_state, delta_time):
-    # Pré-calcul des constantes pour éviter les recalculs
+
+def get_viewport_bounds(screen_width, screen_height, game_map, camera):
+    """
+    Calcule les limites du viewport avec cache.
+    Retourne (min_tile_x, max_tile_x, min_tile_y, max_tile_y).
+    """
+    global _viewport_cache
+    
+    current_time = time.time()
+    camera_state = (camera.offset_x, camera.offset_y, camera.zoom)
+    screen_size = (screen_width, screen_height)
+    
+    # Vérifier si le cache est valide
+    if (_viewport_cache['bounds'] is not None and
+        _viewport_cache['camera_state'] == camera_state and
+        _viewport_cache['screen_size'] == screen_size and
+        current_time - _viewport_cache['timestamp'] < VIEWPORT_CACHE_TTL):
+        return _viewport_cache['bounds']
+    
+    # Pré-calcul des constantes
     half_tile = HALF_TILE_SIZE
     quarter_tile = HALF_TILE_SIZE / 2
     eighth_tile = HALF_TILE_SIZE / 4
     
-    # Calcul des tiles visibles (optimisé)
+    # Calcul des tiles visibles
     corners_screen = [(0, 0), (screen_width, 0), (0, screen_height), (screen_width, screen_height)]
     tile_indices = [
         screen_to_tile(sx, sy, screen_width, screen_height, camera, quarter_tile, eighth_tile)
@@ -39,25 +66,58 @@ def draw_map(screen, screen_width, screen_height, game_map, camera, players, tea
     x_candidates = [t[0] for t in tile_indices]
     y_candidates = [t[1] for t in tile_indices]
 
-    margin = 3  # Réduit de 5 à 3 pour moins de tiles à traiter
+    margin = 3
     min_tile_x = max(0, min(x_candidates) - margin)
     max_tile_x = min(game_map.num_tiles_x - 1, max(x_candidates) + margin)
     min_tile_y = max(0, min(y_candidates) - margin)
     max_tile_y = min(game_map.num_tiles_y - 1, max(y_candidates) + margin)
+    
+    bounds = (min_tile_x, max_tile_x, min_tile_y, max_tile_y)
+    
+    # Mettre en cache
+    _viewport_cache['camera_state'] = camera_state
+    _viewport_cache['screen_size'] = screen_size
+    _viewport_cache['bounds'] = bounds
+    _viewport_cache['timestamp'] = current_time
+    
+    return bounds
+
+def draw_map(screen, screen_width, screen_height, game_map, camera, players, team_colors, game_state, delta_time):
+    # Pré-calcul des constantes pour éviter les recalculs
+    half_tile = HALF_TILE_SIZE
+    quarter_tile = HALF_TILE_SIZE / 2
+    eighth_tile = HALF_TILE_SIZE / 4
+    
+    # Utiliser le cache du viewport
+    min_tile_x, max_tile_x, min_tile_y, max_tile_y = get_viewport_bounds(
+        screen_width, screen_height, game_map, camera
+    )
 
     visible_entities = set()
     visible_projectiles = set()
 
-    # Collecte optimisée des entités visibles
-    grid = game_map.grid
-    inactive = game_map.inactive_matrix
-    for tile_y in range(min_tile_y, max_tile_y + 1):
-        for tile_x in range(min_tile_x, max_tile_x + 1):
-            pos = (tile_x, tile_y)
-            if pos in grid:
-                visible_entities.update(grid[pos])
-            if pos in inactive:
-                visible_entities.update(inactive[pos])
+    # OPTIMISATION: Utiliser le spatial hash pour récupérer les entités visibles
+    if hasattr(game_map, 'get_entities_in_rect'):
+        visible_entities = game_map.get_entities_in_rect(
+            min_tile_x, min_tile_y, max_tile_x, max_tile_y
+        )
+        # Ajouter les entités inactives
+        for tile_y in range(min_tile_y, max_tile_y + 1):
+            for tile_x in range(min_tile_x, max_tile_x + 1):
+                pos = (tile_x, tile_y)
+                if pos in game_map.inactive_matrix:
+                    visible_entities.update(game_map.inactive_matrix[pos])
+    else:
+        # Fallback: méthode originale
+        grid = game_map.grid
+        inactive = game_map.inactive_matrix
+        for tile_y in range(min_tile_y, max_tile_y + 1):
+            for tile_x in range(min_tile_x, max_tile_x + 1):
+                pos = (tile_x, tile_y)
+                if pos in grid:
+                    visible_entities.update(grid[pos])
+                if pos in inactive:
+                    visible_entities.update(inactive[pos])
 
     # Projectiles visibles
     for projectile in game_map.projectiles.values():

@@ -42,10 +42,10 @@ class Villager(Unit):
             #self.seekCollision(game_map, dt)
             self.seekCollect(game_map, dt)
             self.seekStock(game_map)
-            self.seekMove(game_map, dt)
-            self.seekIdle()
             self.seekBuild(game_map)
             self.seekRepair(game_map, dt)
+            self.seekMove(game_map, dt)
+            self.seekIdle()  # seekIdle doit être appelé en dernier pour vérifier si tout est terminé
         else:
             self.death(game_map, dt)
 
@@ -96,7 +96,23 @@ class Villager(Unit):
         if not self.collect_target or not self.collect_target.isAlive():
             # Ne passer à stock que si on a des ressources à déposer
             if self.carry.total() > 0:
-                self.task = 'stock'
+                # S'assurer qu'on a un stock_target avant de passer en stock
+                if not self.stock_target or not self.stock_target.isAlive():
+                    closest_building = None
+                    min_distance = float('inf')
+                    for building in game_map.players[self.team].buildings:
+                        if building.resourceDropPoint:
+                            distance = math.dist((self.x, self.y), (building.x, building.y))
+                            if distance < min_distance:
+                                min_distance = distance
+                                closest_building = building
+                    self.stock_target = closest_building
+                
+                if self.stock_target:
+                    self.task = 'stock'
+                else:
+                    # Pas de point de dépôt, rester idle avec les ressources
+                    self.task = None
             else:
                 # Sinon chercher une nouvelle ressource ou passer en idle
                 self.task = None
@@ -118,9 +134,23 @@ class Villager(Unit):
         if distance > 0 or self.carry.total() >= MAXIMUM_CARRY:
             if not self.path:
                 self.set_destination((self.collect_target.x, self.collect_target.y), game_map)
+                if not self.path:
+                    self.pathfinding_attempts += 1
+                    # Abandonner si trop de tentatives échouées
+                    if self.pathfinding_attempts >= self.max_pathfinding_attempts:
+                        # Si on a des ressources, aller les déposer
+                        if self.carry.total() > 0:
+                            self.task = 'stock'
+                        else:
+                            self.task = None
+                            self.collect_target = None
+                        self.pathfinding_attempts = 0
+                else:
+                    self.pathfinding_attempts = 0
                 self.task_timer = 0
             return
         self.state = 'task'
+        self.pathfinding_attempts = 0  # Réinitialiser quand on arrive à la ressource
         # Collect resources
         self.direction = get_direction(get_snapped_angle((self.x, self.y),
                                                          (self.collect_target.x, self.collect_target.y)))
@@ -151,20 +181,34 @@ class Villager(Unit):
     def seekStock(self, game_map):
         if self.task != 'stock':
             return
+        
+        # Si on n'a rien à déposer, retourner à collect ou idle
+        if self.carry.total() == 0:
+            if self.collect_target and self.collect_target.isAlive():
+                self.task = 'collect'
+            else:
+                # Chercher une nouvelle ressource du même type ou passer en idle
+                self.task = None
+                self.collect_target = None
+            return
+        
         if self.stock_target and self.stock_target.isAlive():
             distance = math.dist((self.x, self.y), (self.stock_target.x, self.stock_target.y)) - self.stock_target.hitbox - 1
-            if self.carry.total() == 0:
-                    self.task = 'collect'
-                    return
             if distance <= 0:
                 self.state = 'idle'
                 self.set_destination(None, game_map)
                 self.stock_target.stock(game_map, self.carry.get())
                 self.carry.reset()
+                # Après dépôt, retourner à la collecte si la cible existe encore
+                if self.collect_target and self.collect_target.isAlive():
+                    self.task = 'collect'
+                else:
+                    self.task = None
+                    self.collect_target = None
             elif not self.path:
                 self.set_destination((self.stock_target.x, self.stock_target.y), game_map)
        
-        else :
+        else:
             closest_building = None
             min_distance = float('inf')
             for building in game_map.players[self.team].buildings:
@@ -175,6 +219,9 @@ class Villager(Unit):
                         closest_building = building
             if closest_building:
                 self.stock_target = closest_building
+            else:
+                # Pas de point de dépôt, passer en idle
+                self.task = None
     
     def seekBuild(self, game_map):
         if self.task != 'build':
@@ -201,12 +248,23 @@ class Villager(Unit):
         if distance > 0 :
             if self.path:
                 self.path = [self.path[0]] + a_star((self.x, self.y), (self.build_target.x,self.build_target.y), game_map)
+                self.pathfinding_attempts = 0
             else:
                 self.set_destination((self.build_target.x,self.build_target.y), game_map)
+                if not self.path:
+                    self.pathfinding_attempts += 1
+                    # Abandonner la tâche si trop de tentatives échouées
+                    if self.pathfinding_attempts >= self.max_pathfinding_attempts:
+                        self.task = None
+                        self.build_target = None
+                        self.pathfinding_attempts = 0
+                else:
+                    self.pathfinding_attempts = 0
         
         else:
             self.state = 'task'
             self.path = []
+            self.pathfinding_attempts = 0
 
     def seekRepair(self, game_map, dt):
         if self.task != 'repair':
