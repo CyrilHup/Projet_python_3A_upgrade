@@ -1,10 +1,23 @@
 # Ignorer les répertoires de cache Python
 __pycache__/
 *.py[cod]
+*.pyo
+*.pyc
 
-# Ignorer le cache de sprites (fichiers volumineux)
+# Ignorer tous les fichiers de cache (volumineux)
 .sprite_cache/
 *.cache
+*.pkl
+*.pickle
+
+# Cache pygame/assets
+*.surface
+sprite_cache*.dat
+
+# Environnement virtuel Python
+venv/
+.venv/
+env/
 
 # Ignorer les fichiers système
 .DS_Store
