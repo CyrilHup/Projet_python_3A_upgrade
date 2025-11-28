@@ -25,5 +25,3 @@ class Barracks(Building):
             team.resources["food"] -= swordsman.cost.food
             team.resources["gold"] -= swordsman.cost.gold
             team.en_cours[swordsman] = clock
-        else:
-            print("not enough resssources or maximum poulation reached")

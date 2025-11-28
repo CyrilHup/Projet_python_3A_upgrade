@@ -116,7 +116,7 @@
 
 ---
 
-## 🧹 PHASE 4 : NETTOYAGE LEGACY CODE
+## 🧹 PHASE 4 : NETTOYAGE LEGACY CODE ✅ COMPLÈTE
 
 > Supprimer le code mort et moderniser
 
@@ -124,18 +124,20 @@
 
 | # | Fichier | Lignes/Description | Statut |
 |---|---------|-------------------|--------|
-| 4.1.1 | ⬜ `Entity/Unit/Villager.py` | Bloc commenté lignes ~155-230 (`collectResource`, etc.) | |
-| 4.1.2 | ⬜ `Controller/Bot.py` | Méthodes commentées `easy_strategy`, `hard_strategy` ~256-280 | |
-| 4.1.3 | ⬜ `Controller/game_loop_backup.py` | Fichier entier (doublon) | |
-| 4.1.4 | ⬜ `Entity/Unit/Unit.py` | Méthode `display_path` dupliquée ~115-135 | |
+| 4.1.1 | ✅ `Entity/Unit/Villager.py` | Bloc commenté ~120 lignes (`display_hitbox`, `collectResource`, etc.) supprimé | FAIT |
+| 4.1.2 | ✅ `Controller/Bot.py` | Code mort `scout_map`, `easy_strategy`, `hard_strategy` (~70 lignes) supprimé | FAIT |
+| 4.1.3 | ✅ `Controller/game_loop_backup.py` | Fichier supprimé (812 lignes) | FAIT |
+| 4.1.4 | ✅ `Controller/game_loop_optimized.py` | Fichier supprimé (490 lignes doublon) | FAIT |
+| 4.1.5 | ✅ `Entity/Unit/Unit.py` | Méthode `display_path` dupliquée supprimée (Phase 1) | FAIT |
 
 ### 4.2 Nettoyage Debug/Prints
 
 | # | Tâche | Description | Statut |
 |---|-------|-------------|--------|
-| 4.2.1 | ⬜ Remplacer tous les `print("DEBUG: ...")` par logging | Système de log propre | |
-| 4.2.2 | ⬜ Conditionner les `## DEBUG INSTRUCTIONS` avec un flag | Entity.py, etc. | |
-| 4.2.3 | ⬜ Supprimer les prints commentés | Nettoyage général | |
+| 4.2.1 | ✅ Supprimé prints DEBUG | `terminal_display.py` (2 prints DEBUG) | FAIT |
+| 4.2.2 | ✅ Supprimé print inutile | `Barracks.py` print("not enough...") | FAIT |
+| 4.2.3 | ✅ Supprimé print warning | `Map.py` print(f"Warning: Entity team...") | FAIT |
+| 4.2.4 | ℹ️ debug_print() conservés | Système conditionné par `terminal_display_debug.py` - OK | N/A |
 
 ### 4.3 Modernisation Python
 

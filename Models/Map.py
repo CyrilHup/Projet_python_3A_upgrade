@@ -39,7 +39,7 @@ class GameMap:
         # Add safety check for team ID
         if hasattr(entity, 'team') and entity.team is not None:
             if entity.team >= len(self.players):
-                print(f"Warning: Entity team ID {entity.team} out of range for {len(self.players)} players")
+                # Invalid team ID - silently reject
                 return False
 
         rounded_x, rounded_y = round(x), round(y)

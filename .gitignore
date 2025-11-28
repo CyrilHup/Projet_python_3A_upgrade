@@ -2,6 +2,10 @@
 __pycache__/
 *.py[cod]
 
+# Ignorer le cache de sprites (fichiers volumineux)
+.sprite_cache/
+*.cache
+
 # Ignorer les fichiers système
 .DS_Store
 

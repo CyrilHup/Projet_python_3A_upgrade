@@ -19,7 +19,6 @@ def start_terminal_interface(game_map):
     """
     Lance le mode curses en parallèle, pour afficher la carte ASCII + zone debug.
     """
-    print("DEBUG: start_terminal_interface called") # DEBUG PRINT
     curses.wrapper(_curses_main, game_map)
 
 def resolve_save_path(relative_path):
@@ -32,8 +31,6 @@ def _curses_main(stdscr, game_map):
     Fonction principale curses, gère l'affichage ASCII + lecture clavier
     pour scroller sur la map, etc.
     """
-    print("DEBUG: _curses_main started") # DEBUG PRINT
-    
     # Reset the terminal completely
     os.system('cls' if os.name == 'nt' else 'clear')
     curses.start_color()
