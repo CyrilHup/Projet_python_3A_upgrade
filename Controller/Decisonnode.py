@@ -1,5 +1,6 @@
 # Chemin de C:/Users/cyril/OneDrive/Documents/INSA/3A/PYTHON_TEST/Projet_python\Controller\Decisonnode.py
 from Controller.terminal_display_debug import debug_print
+from Settings.entity_mapping import building_class_map
 
 import time as _time
 
@@ -147,6 +148,21 @@ def expansion_action(bot):
     decision_debug(f"Team {bot.team.teamID}: ACTION -> expansion")
     return bot.manage_expansion()
 
+def can_build_needed_structure_condition(bot):
+    """Vérifie si on a besoin d'un bâtiment ET qu'on a les ressources pour le construire"""
+    needed = bot.check_building_needs()
+    if not needed:
+        return False
+    
+    # Check if we have resources for AT LEAST ONE needed building
+    for building_name in needed:
+        if building_name in building_class_map:
+            building_class = building_class_map[building_name]
+            if bot.can_build_building(building_class):
+                decision_debug(f"Team {bot.team.teamID}: Can build needed: {building_name}", f"can_build_{bot.team.teamID}")
+                return True
+    return False
+
 # --- Decision Trees ---
 
 def create_economic_decision_tree(bot):
@@ -157,24 +173,32 @@ def create_economic_decision_tree(bot):
             action = lambda: defend_action(bot)
         ),
         false_branch = DecisionNode(
-            # IMPORTANT: Vérifier les ressources AVANT les bâtiments
-            # get_resource_shortage prend maintenant en compte le coût des bâtiments
-            condition = lambda: is_resource_shortage_condition(bot),
+            # 1. Try to build needed structures if we have resources (PRIORITY OVER GATHERING)
+            condition = lambda: can_build_needed_structure_condition(bot),
             true_branch = DecisionNode(
-                action = lambda: address_resource_shortage_action(bot)
+                action = lambda: build_needed_structure_action(bot)
             ),
             false_branch = DecisionNode(
-                condition = lambda: are_buildings_needed_condition(bot),
+                # 2. If we can't build (missing resources) or nothing needed, check shortages
+                condition = lambda: is_resource_shortage_condition(bot),
                 true_branch = DecisionNode(
-                    action = lambda: build_needed_structure_action(bot)
+                    action = lambda: address_resource_shortage_action(bot)
                 ),
                 false_branch = DecisionNode(
+                    # 3. If no shortages, check expansion
                     condition = lambda: should_expand_condition(bot),
                     true_branch = DecisionNode(
                         action = lambda: expansion_action(bot)
                     ),
                     false_branch = DecisionNode(
-                        action = lambda: balance_army_action(bot)
+                        # 4. Balance army / Attack if idle
+                        condition = lambda: is_military_count_low_condition(bot),
+                        true_branch = DecisionNode(
+                            action = lambda: balance_army_action(bot)
+                        ),
+                        false_branch = DecisionNode(
+                            action = lambda: manage_offense_action(bot)
+                        )
                     )
                 )
             )
@@ -238,17 +262,19 @@ def create_default_decision_tree(bot):
             action=lambda: defend_action(bot)
         ),
         false_branch=DecisionNode(
-            # IMPORTANT: Vérifier les ressources AVANT les bâtiments
-            condition=lambda: is_resource_shortage_condition(bot),
-            true_branch=DecisionNode(
-                action=lambda: address_resource_shortage_action(bot)
+            # 1. Try to build needed structures if we have resources
+            condition = lambda: can_build_needed_structure_condition(bot),
+            true_branch = DecisionNode(
+                action = lambda: build_needed_structure_action(bot)
             ),
             false_branch=DecisionNode(
-                condition=lambda: are_buildings_needed_condition(bot),
+                # 2. Check resource shortages
+                condition=lambda: is_resource_shortage_condition(bot),
                 true_branch=DecisionNode(
-                    action=lambda: build_needed_structure_action(bot)
+                    action=lambda: address_resource_shortage_action(bot)
                 ),
                 false_branch=DecisionNode(
+                    # 3. Balance army
                     condition=lambda: is_military_count_low_condition(bot),
                     true_branch=DecisionNode(
                         action=lambda: balance_army_action(bot)

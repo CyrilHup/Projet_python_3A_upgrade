@@ -865,7 +865,7 @@ class Bot:
         
         # Vérifier les bâtiments de base manquants
         essential_buildings = [
-            (TownCentre, "TownCentre"),
+            (TownCentre, "TownCenter"),
             (House, "House"),
             (Camp, "Camp"),
             (Barracks, "Barracks"),
