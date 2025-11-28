@@ -14,28 +14,32 @@ from Controller.utils import *
 from Controller.init_assets import *
 from Controller.gui import get_scaled_gui
 
+# Cache global pour les fonts (OPTIMISATION CRITIQUE)
+_font_cache = {}
+
+def get_cached_font(size):
+    """Retourne une font depuis le cache, la crée si nécessaire."""
+    if size not in _font_cache:
+        _font_cache[size] = pygame.font.Font(None, size)
+    return _font_cache[size]
+
 def draw_map(screen, screen_width, screen_height, game_map, camera, players, team_colors, game_state, delta_time):
-    corners_screen = [
-        (0, 0),
-        (screen_width, 0),
-        (0, screen_height),
-        (screen_width, screen_height)
-    ]
+    # Pré-calcul des constantes pour éviter les recalculs
+    half_tile = HALF_TILE_SIZE
+    quarter_tile = HALF_TILE_SIZE / 2
+    eighth_tile = HALF_TILE_SIZE / 4
+    
+    # Calcul des tiles visibles (optimisé)
+    corners_screen = [(0, 0), (screen_width, 0), (0, screen_height), (screen_width, screen_height)]
     tile_indices = [
-        screen_to_tile(
-            sx, sy,
-            screen_width, screen_height,
-            camera,
-            HALF_TILE_SIZE / 2,
-            HALF_TILE_SIZE / 4
-        )
+        screen_to_tile(sx, sy, screen_width, screen_height, camera, quarter_tile, eighth_tile)
         for sx, sy in corners_screen
     ]
 
     x_candidates = [t[0] for t in tile_indices]
     y_candidates = [t[1] for t in tile_indices]
 
-    margin = 5
+    margin = 3  # Réduit de 5 à 3 pour moins de tiles à traiter
     min_tile_x = max(0, min(x_candidates) - margin)
     max_tile_x = min(game_map.num_tiles_x - 1, max(x_candidates) + margin)
     min_tile_y = max(0, min(y_candidates) - margin)
@@ -44,36 +48,30 @@ def draw_map(screen, screen_width, screen_height, game_map, camera, players, tea
     visible_entities = set()
     visible_projectiles = set()
 
-    # Entities: Iterate through visible tiles and add entities from those tiles
-    for tile_y in range(min_tile_y, max_tile_y + 1):  # +1 to include max range
-        for tile_x in range(min_tile_x, max_tile_x + 1):  # +1 to include max range
-            entity_set_active = game_map.grid.get((tile_x, tile_y), None)
-            entity_set_inactive = game_map.inactive_matrix.get((tile_x, tile_y), None)
+    # Collecte optimisée des entités visibles
+    grid = game_map.grid
+    inactive = game_map.inactive_matrix
+    for tile_y in range(min_tile_y, max_tile_y + 1):
+        for tile_x in range(min_tile_x, max_tile_x + 1):
+            pos = (tile_x, tile_y)
+            if pos in grid:
+                visible_entities.update(grid[pos])
+            if pos in inactive:
+                visible_entities.update(inactive[pos])
 
-            if entity_set_active:
-                visible_entities.update(entity_set_active)  # Use update for efficiency
-            if entity_set_inactive:
-                visible_entities.update(entity_set_inactive)  # Use update for efficiency
-
-    # Projectiles: Filter projectiles based on their tile position
+    # Projectiles visibles
     for projectile in game_map.projectiles.values():
         projx, projy = round(projectile.x), round(projectile.y)
-        if min_tile_x <= projx <= max_tile_x and min_tile_y <= projy <= max_tile_y:  # Check if projectile tile is visible
+        if min_tile_x <= projx <= max_tile_x and min_tile_y <= projy <= max_tile_y:
             visible_projectiles.add(projectile)
 
-
-    for tile_y in range(min_tile_y, max_tile_y):
-        for tile_x in range(min_tile_x, max_tile_x):
-            # Fill grass
-            if tile_x % 10 == 0 and tile_y % 10 == 0:
+    # Dessin de l'herbe (optimisé avec pas de 10)
+    for tile_y in range(min_tile_y - (min_tile_y % 10), max_tile_y, 10):
+        for tile_x in range(min_tile_x - (min_tile_x % 10), max_tile_x, 10):
+            if tile_x >= 0 and tile_y >= 0:
                 grass_sx, grass_sy = tile_to_screen(
-                    tile_x + 4.5,
-                    tile_y + 4.5,
-                    HALF_TILE_SIZE,
-                    HALF_TILE_SIZE / 2,
-                    camera,
-                    screen_width,
-                    screen_height
+                    tile_x + 4.5, tile_y + 4.5,
+                    half_tile, quarter_tile, camera, screen_width, screen_height
                 )
                 fill_grass(screen, grass_sx, grass_sy, camera)
 
@@ -116,8 +114,8 @@ def draw_map(screen, screen_width, screen_height, game_map, camera, players, tea
                 fill_w = int(bar_width * entity.training_progress)
                 pygame.draw.rect(screen, (0, 220, 0), (bar_x, bar_y, fill_w, bar_height))
 
-                # Draw queue length
-                font_obj = pygame.font.Font(None, 18)
+                # Draw queue length (utilise cache font)
+                font_obj = get_cached_font(18)
                 queue_len = len(entity.training_queue)
                 queue_text = f"Q:{queue_len}"
                 queue_surf = font_obj.render(queue_text, True, (255, 255, 255))
@@ -142,7 +140,7 @@ def draw_map(screen, screen_width, screen_height, game_map, camera, players, tea
 
                 button_rect = pygame.Rect(button_x, button_y, button_width, button_height)
                 pygame.draw.rect(screen, (120, 120, 180), button_rect)
-                font_obj = pygame.font.Font(None, 18)
+                font_obj = get_cached_font(18)
 
                 from Entity.Building.Building import UNIT_TRAINING_MAP
                 if entity.acronym in UNIT_TRAINING_MAP:
@@ -265,8 +263,8 @@ def draw_buildProcess(screen, screen_x, screen_y, time, zoom, color=(255,255,255
     seconds = time % 60
     time_text = f"{int(minutes)}:{int(seconds)}"
     base_font_size = 36
-    font_size = int(base_font_size * zoom) 
-    font = pygame.font.Font(None, font_size)
+    font_size = max(12, int(base_font_size * zoom))  # Minimum 12 pour le cache
+    font = get_cached_font(font_size)
     time_surface = font.render(time_text, True, color)
     screen.blit(time_surface, (screen_x - time_surface.get_width()//2, screen_y - time_surface.get_height()//2))
 

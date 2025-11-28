@@ -22,13 +22,11 @@ class Bot:
         self.difficulty = difficulty
         self.mode = mode
 
-        self.decision_tree = None
         self.enemies = [team for team in game_map.players if team.teamID != self.team.teamID]
         self.players_target = game_map.game_state.get('players_target') if game_map.game_state else [None] * len(players)
 
         self.attacking_enemies = None
 
-        self.decision_tree = None
         self.priority = None
         self.ATTACK_RADIUS = 5  # Rayon d'attaque pour détecter les ennemis
         self.PRIORITY_UNITS = {
@@ -36,24 +34,36 @@ class Bot:
             's': 2,  # Swordsmen
             'h': 1   # Horsemen
         }
+        
+        # Créer l'arbre de décision UNE SEULE FOIS à l'initialisation
+        self.decision_tree = self.create_mode_decision_tree()
 
     def update(self, game_map, dt):
-        self.decision_tree = self.create_mode_decision_tree()
-        self.decision_tree.evaluate()
+        # Mettre à jour la référence à game_map au cas où elle change
+        self.game_map = game_map
+        
+        # Évaluer l'arbre de décision
+        if self.decision_tree:
+            self.decision_tree.evaluate()
 
     def set_priority(self, priority):
         self.priority = priority
 
     def get_resource_shortage(self):
+        """Détermine quelle ressource récolter en priorité"""
+        resources = self.team.resources
+        
+        # Si on n'a pas assez de bois pour construire une ferme (60 wood), prioriser le bois
+        if resources.wood < 60:
+            return Tree
+        
+        # Sinon, vérifier les pénuries dans l'ordre de priorité
         RESOURCE_MAPPING = {
             "food": Farm,
             "wood": Tree,
             "gold": Gold,
         }
         
-        resources = self.team.resources  # Utilisation directe des ressources actuelles de l'équipe
-        
-        # Vérifier s'il y a une pénurie en comparant avec RESOURCE_THRESHOLDS
         for resource in ["food", "wood", "gold"]:
             if getattr(resources, resource) < getattr(RESOURCE_THRESHOLDS, resource):
                 return RESOURCE_MAPPING[resource]
@@ -62,79 +72,77 @@ class Bot:
 
 
 
-    def reallocate_villagers(self, Resource):
+    def reallocate_villagers(self, resource_type):
+        """VERSION OPTIMISÉE - resource_type est Farm, Tree, ou Gold (classes)"""
+        # Prendre les villagers disponibles OU sans tâche
         available_villagers = [unit for unit in self.team.units
-                               if isinstance(unit, Villager) and unit.isAvailable()]
-        available_farms = [farm for farm in self.team.buildings
-                           if isinstance(farm, Farm)]
+                               if isinstance(unit, Villager) and (unit.isAvailable() or unit.task is None)]
         
-        for villager in available_villagers:
-            drop_points = [b for b in self.team.buildings if b.resourceDropPoint]
-            if not drop_points:
-                return
+        if not available_villagers:
+            return
+            
+        # Traiter jusqu'à 3 villagers à la fois
+        villagers_to_process = available_villagers[:3]
+        
+        drop_points = [b for b in self.team.buildings if b.resourceDropPoint]
+        if not drop_points:
+            return
+        
+        for villager in villagers_to_process:
             nearest_drop_point = min(
                 drop_points,
-                key=lambda dp: math.dist((villager.x, villager.y), (dp.x, dp.y))
+                key=lambda dp: abs(villager.x - dp.x) + abs(villager.y - dp.y)
             )
 
-            if issubclass(Resource, Farm):
-                if not available_farms:
-                    if not available_villagers:
-                        closest_buildable_position = None
-                        min_distance = float('inf')
-                        # Try to find a 2x2 area for a farm
-                        nx, ny = int(nearest_drop_point.x), int(nearest_drop_point.y)
-                        search_range = 10  # Adjust as needed
-                        closest_buildable_position = None
-                        min_distance = float('inf')
+            # Si on a besoin de nourriture (Farm)
+            if resource_type is Farm:
+                available_farms = [farm for farm in self.team.buildings if isinstance(farm, Farm)]
+                if available_farms:
+                    villager.set_target(available_farms[0])
+                    continue
+                else:
+                    # Chercher un emplacement pour construire une ferme
+                    nx, ny = int(nearest_drop_point.x), int(nearest_drop_point.y)
+                    for radius in range(1, 11):
+                        found = False
+                        for dx in range(-radius, radius + 1):
+                            for dy in range(-radius, radius + 1):
+                                if abs(dx) == radius or abs(dy) == radius:
+                                    x, y = nx + dx, ny + dy
+                                    if self.game_map.buildable_position(x, y, size=4):
+                                        if self.team.build('Farm', x, y, 1, self.game_map, True):
+                                            return
+                                        found = True
+                                        break
+                            if found:
+                                break
+                        if found:
+                            break
+                    continue
 
-                        for dx in range(-search_range, search_range + 1):
-                            for dy in range(-search_range, search_range + 1):
-                                x = nx + dx
-                                y = ny + dy
-                                # Check 2x2 area is buildable
-                                if (self.game_map.buildable_position(x, y, size = 4)):
-                                    distance = math.dist((nx, ny), (x, y))
-                                    if distance < min_distance:
-                                        min_distance = distance
-                                        closest_buildable_position = (x, y)
-
-                        if closest_buildable_position:
-                            x, y = closest_buildable_position
-                            # Attempt building at the discovered position
-                            if self.team.build('Farm', x, y, 1, self.game_map, True):
-                                return
-                    else:
-                        closest_buildable_position = None
-                        min_distance = float('inf')
-                        for x, y in self.team.zone.get_zone():
-                            if (self.game_map.buildable_position(x, y, size = 4)):
-                                distance = math.dist((nearest_drop_point.x, nearest_drop_point.y), (x, y))
-                                if distance < min_distance:
-                                    min_distance = distance
-                                    closest_buildable_position = (x, y)
-                        if closest_buildable_position:
-                            x, y = closest_buildable_position
-                            if self.team.build('Farm', x, y, 1, self.game_map):
-                                return
-
-            resource_locations = []
-            for pos, entities in self.game_map.resources.items():
-                if entities:
-                    for entity in entities:
-                        if isinstance(entity, Resource):
-                            resource_locations.append((pos, entity))
+            # Chercher des ressources proches du drop point (Tree pour wood, Gold pour gold)
+            nx, ny = int(nearest_drop_point.x), int(nearest_drop_point.y)
+            best_resource = None
+            best_distance = float('inf')
             
-            if resource_locations:
-                closest_resource = min(
-                    resource_locations,
-                    key=lambda pos_entity: math.dist(
-                        (nearest_drop_point.x, nearest_drop_point.y),
-                        pos_entity[0]
-                    )
-                )
-                villager.set_target(closest_resource[1])
-                break
+            for radius in range(1, 20):
+                for dx in range(-radius, radius + 1):
+                    for dy in range(-radius, radius + 1):
+                        if abs(dx) == radius or abs(dy) == radius:
+                            pos = (nx + dx, ny + dy)
+                            entities = self.game_map.resources.get(pos)
+                            if entities:
+                                for entity in entities:
+                                    if isinstance(entity, resource_type):
+                                        dist = abs(dx) + abs(dy)
+                                        if dist < best_distance:
+                                            best_distance = dist
+                                            best_resource = entity
+                if best_resource:
+                    break
+            
+            if best_resource:
+                villager.set_target(best_resource)
 
     def priority7(self):
         resource_shortage = self.get_resource_shortage()
@@ -144,11 +152,19 @@ class Bot:
 
 
     def search_for_target(self, unit, enemy_team, attack_mode=True):
-        if enemy_team==None:
-            return
+        """Cherche une cible pour l'unité parmi l'équipe ennemie.
+        
+        Returns:
+            bool: True si une cible a été trouvée et assignée, False sinon
+        """
+        if enemy_team is None:
+            return False
+        if not enemy_team.units and not enemy_team.buildings:
+            return False
+            
         closest_distance = float("inf")
         closest_entity = None
-        keeps=[keep for keep in enemy_team.buildings if isinstance(keep,Keep)]
+        keeps = [keep for keep in enemy_team.buildings if isinstance(keep, Keep)]
         targets=[unit for unit in enemy_team.units if not isinstance(unit,Villager)]
 
         for enemy in targets:
@@ -212,26 +228,32 @@ class Bot:
         return self.choose_target(players, selected_player, players_target)
 
     def manage_battle(self, selected_player, players_target, players, game_map, dt):
-        enemy=players_target[selected_player.teamID]
-        attack_mode=True
-        if True:
-            for i in range(0,len(players_target)):
-                if players_target[i]==selected_player:
-                    for team in players:
-                        if team.teamID==i:
-                                players_target[selected_player.teamID]=None
-                                enemy=team
-                                attack_mode=False
-        if enemy!=None and (len(enemy.units)!=0 or len(enemy.buildings)!=0):
+        """Gère le combat pour un joueur sélectionné."""
+        enemy = players_target[selected_player.teamID]
+        attack_mode = True
+        
+        # Vérifier si on est ciblé par un autre joueur
+        for i in range(len(players_target)):
+            if players_target[i] == selected_player:
+                for team in players:
+                    if team.teamID == i:
+                        players_target[selected_player.teamID] = None
+                        enemy = team
+                        attack_mode = False
+                        break
+                break
+        
+        # Assigner des cibles aux unités si l'ennemi existe et a des unités/bâtiments
+        if enemy is not None and (len(enemy.units) != 0 or len(enemy.buildings) != 0):
             for unit in selected_player.units:
-                if enemy!=None and (len(enemy.units)!=0 or len(enemy.buildings)!=0):
-                    for unit in selected_player.units:
-                        if not isinstance(unit,Villager) or (len(selected_player.units)==0 and not attack_mode):
-                            if unit.attack_target==None or not unit.attack_target.isAlive():
-                                self.search_for_target(unit, enemy, attack_mode)
+                if not isinstance(unit, Villager) or (len(selected_player.units) == 0 and not attack_mode):
+                    if unit.attack_target is None or not unit.attack_target.isAlive():
+                        self.search_for_target(unit, enemy, attack_mode)
         else:
             self.modify_target(selected_player, None, players_target)
-        if self.get_military_unit_count(selected_player)==0:
+        
+        # Reset si plus d'unités militaires
+        if self.get_military_unit_count(selected_player) == 0:
             self.modify_target(selected_player, None, players_target)
 
     def get_military_unit_count(self, player):
@@ -424,14 +446,46 @@ class Bot:
         return False
 
     def is_under_attack(self):
-        attacking_enemies = []  # Initialize an empty list to store attacking enemies
-        zone = self.team.zone.get_zone()
-        for tile in zone:
-            entities = self.game_map.grid.get(tile, None)
-            if entities:  # Check if entities is not None before iterating
+        """Vérifie si l'équipe est attaquée - VERSION OPTIMISÉE
+        
+        Returns:
+            bool: True si des ennemis sont détectés près des bâtiments, False sinon
+        """
+        my_team_id = self.team.teamID
+        
+        # Au lieu d'itérer sur toute la zone, vérifier autour des bâtiments
+        check_positions = set()
+        for building in self.team.buildings:
+            bx, by = int(building.x), int(building.y)
+            # Vérifier dans un rayon de 5 autour de chaque bâtiment
+            for dx in range(-5, 6):
+                for dy in range(-5, 6):
+                    check_positions.add((bx + dx, by + dy))
+        
+        # Limiter le nombre de positions à vérifier
+        for tile in check_positions:
+            entities = self.game_map.grid.get(tile)
+            if entities:
                 for entity in entities:
-                    if isinstance(entity, Unit) and entity.team != self.team.teamID:
+                    if isinstance(entity, Unit) and entity.team != my_team_id:
+                        # Cache les ennemis détectés pour gather_units_for_defense
+                        self.attacking_enemies = self._get_attacking_enemies(check_positions, my_team_id)
+                        return True
+        
+        self.attacking_enemies = []
+        return False
+    
+    def _get_attacking_enemies(self, check_positions, my_team_id):
+        """Récupère la liste des ennemis attaquant (appelé après is_under_attack)"""
+        attacking_enemies = []
+        for tile in check_positions:
+            entities = self.game_map.grid.get(tile)
+            if entities:
+                for entity in entities:
+                    if isinstance(entity, Unit) and entity.team != my_team_id:
                         attacking_enemies.append(entity)
+                        if len(attacking_enemies) >= 10:
+                            return attacking_enemies
         return attacking_enemies
         
     def get_critical_points(self):
@@ -450,8 +504,8 @@ class Bot:
 
     def gather_units_for_defense(self, units_per_target=2):
         """Rassemble les unités militaires pour défendre contre les ennemis détectés"""
-        # Obtenir la liste des ennemis qui attaquent
-        attacking_enemies = self.is_under_attack()
+        # Utiliser la liste des ennemis mise en cache par is_under_attack()
+        attacking_enemies = getattr(self, 'attacking_enemies', [])
         if not attacking_enemies:
             return
 
@@ -558,71 +612,72 @@ class Bot:
                         unit.setIdle()
 
     def check_building_needs(self):
+        """VERSION OPTIMISÉE - Vérifie quels bâtiments sont nécessaires"""
+        # Compter les types de bâtiments une seule fois
+        building_counts = {}
+        for building in self.team.buildings:
+            btype = type(building)
+            building_counts[btype] = building_counts.get(btype, 0) + 1
+        
         needed_buildings = []
         
-        # Ajouter des bâtiments militaires si on se prépare à l'expansion
-        if self.is_ready_to_expand():
-            if not any(isinstance(building, ArcheryRange) for building in self.team.buildings):
-                needed_buildings.append("ArcheryRange")
-            if not any(isinstance(building, Barracks) for building in self.team.buildings):
-                needed_buildings.append("Barracks")
-            if not any(isinstance(building, Keep) for building in self.team.buildings):
-                needed_buildings.append("Keep")
+        # Vérifier les bâtiments de base manquants
+        essential_buildings = [
+            (TownCentre, "TownCentre"),
+            (House, "House"),
+            (Camp, "Camp"),
+            (Barracks, "Barracks"),
+            (Farm, "Farm"),
+        ]
         
-        # Donner la priorité aux bâtiments de population si nécessaire
+        for building_class, building_name in essential_buildings:
+            if building_class not in building_counts:
+                needed_buildings.append(building_name)
+        
+        # Ajouter des maisons si proche de la limite de population
         if self.needs_population_buildings():
-            if self.team.maximum_population < MAXIMUM_POPULATION - 10:
-                if not any(isinstance(building, TownCentre) for building in self.team.buildings):
-                    needed_buildings.append("TownCentre")
-                if not any(isinstance(building, House) for building in self.team.buildings):
-                    needed_buildings.append("House")
+            if "House" not in needed_buildings:
+                needed_buildings.append("House")
         
-        # Ajouter les autres bâtiments nécessaires
-        if not any(isinstance(building, Barracks) for building in self.team.buildings):
-            needed_buildings.append("Barracks")
-        if not any(isinstance(building, TownCentre) for building in self.team.buildings):
-            needed_buildings.append("TownCentre")
-        if not any(isinstance(building, Camp) for building in self.team.buildings):
-            needed_buildings.append("Camp")
-        if not any(isinstance(building, House) for building in self.team.buildings):
-            needed_buildings.append("House")
-        if not any(isinstance(building, Keep) for building in self.team.buildings):
-            needed_buildings.append("Keep")
-        if not any(isinstance(building, Farm) for building in self.team.buildings):
-            needed_buildings.append("Farm")
-        if not any(isinstance(building, Stable) for building in self.team.buildings):
-            needed_buildings.append("Stable")
-        if not any(isinstance(building, ArcheryRange) for building in self.team.buildings):
-            needed_buildings.append("ArcheryRange")
+        # Bâtiments avancés seulement si prêt à l'expansion
+        if self.is_ready_to_expand():
+            advanced_buildings = [
+                (ArcheryRange, "ArcheryRange"),
+                (Stable, "Stable"),
+                (Keep, "Keep"),
+            ]
+            for building_class, building_name in advanced_buildings:
+                if building_class not in building_counts:
+                    needed_buildings.append(building_name)
         
-        # Ajouter des maisons supplémentaires si besoin de population
-        if self.needs_population_buildings() and "House" not in needed_buildings:
-            needed_buildings.append("House")
-            
         return needed_buildings
 
+    # Cache pour les tailles de bâtiments
+    _building_size_cache = {}
+    
     def find_building_location(self, building_type):
-        # Get the building size
-        building_class = building_class_map[building_type]
-        building_instance = building_class(team=self.team.teamID)
-        building_size = building_instance.size
-        del building_instance
+        # Utiliser le cache pour la taille du bâtiment
+        if building_type not in Bot._building_size_cache:
+            building_class = building_class_map[building_type]
+            temp_instance = building_class(team=0)
+            Bot._building_size_cache[building_type] = temp_instance.size
+        
+        building_size = Bot._building_size_cache[building_type]
 
-        # Get list of coordinates in team's zone
-        zone_coords = list(self.team.zone.get_zone())
-        if not zone_coords:
-            return None
-
-        # Try 10 random positions
-        for _ in range(10):
-            # Pick a random position in the zone
-            pos = choice(zone_coords)
-            x, y = pos
-
-            # Check if area is buildable
-            if self.game_map.buildable_position(x, y, building_size):
-                return (x, y)
-
+        # Chercher autour d'un bâtiment existant au lieu de toute la zone
+        if self.team.buildings:
+            ref_building = next(iter(self.team.buildings))  # Prendre le premier élément du set
+            ref_x, ref_y = int(ref_building.x), int(ref_building.y)
+            
+            # Chercher dans un rayon de 15
+            for radius in range(1, 16):
+                for dx in range(-radius, radius + 1):
+                    for dy in range(-radius, radius + 1):
+                        if abs(dx) == radius or abs(dy) == radius:  # Seulement le périmètre
+                            x, y = ref_x + dx, ref_y + dy
+                            if self.game_map.buildable_position(x, y, building_size):
+                                return (x, y)
+        
         return None
 
     def can_build_building(self, building_class):

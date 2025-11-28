@@ -23,7 +23,7 @@ os.makedirs(ASSETS_DIRECTORY, exist_ok=True)
 # Classe Villager
 # -------------------
 GAME_SPEED = 5
-FPS_DRAW_LIMITER = 50
+FPS_DRAW_LIMITER = 60  # Augmenté pour plus de fluidité
 
 BUILDING_TIME_REDUCTION = 0.75
 BUILDING_ZONE_OFFSET = 1
@@ -33,7 +33,7 @@ MAXIMUM_CARRY = 20
 # -------------------
 # BOT constants
 # -------------------
-DPS = 1 # 2 decisions per second
+DPS = 2  # 2 decisions per second - augmenté pour réactivité
 
 # -------------------
 # Unit constants

@@ -48,7 +48,6 @@ from Settings.setup import (
 )
 from Settings.sync import TEMP_SAVE_PATH
 from Controller.sync_manager import check_and_load_sync
-from Controller.profiler import ProfileSection, tick_frame, print_report
 
 
 def is_player_dead(player):
@@ -305,52 +304,48 @@ def game_loop(screen, game_map, screen_width, screen_height, players):
 
     # ==================== BOUCLE PRINCIPALE ====================
     while running:
-        with ProfileSection('frame_total'):
-            current_time = time.time()
+        current_time = time.time()
+        
+        # Calcul delta time
+        if not is_terminal_only:
+            raw_dt = clock.tick(target_fps) / ONE_SECOND
+        else:
+            raw_dt = current_time - last_time
+            last_time = current_time
+            time.sleep(0.01)
+
+        dt = 0 if game_state['paused'] else raw_dt * GAME_SPEED
+
+        # Mise à jour des bots (avec timer)
+        if not game_state['paused']:
+            bot_update_timer += dt
+            if bot_update_timer >= bot_update_interval:
+                for bot in bots:
+                    bot.update(game_map, bot_update_interval)
+                bot_update_timer = 0
+
+        # Gestion caméra et événements (mode GUI uniquement)
+        if not is_terminal_only:
+            handle_camera(camera, raw_dt * GAME_SPEED)
             
-            # Calcul delta time
-            if not is_terminal_only:
-                raw_dt = clock.tick(target_fps) / ONE_SECOND
-            else:
-                raw_dt = current_time - last_time
-                last_time = current_time
-                time.sleep(0.01)
-
-            dt = 0 if game_state['paused'] else raw_dt * GAME_SPEED
-
-            # Mise à jour des bots (avec timer)
-            if not game_state['paused']:
-                bot_update_timer += dt
-                if bot_update_timer >= bot_update_interval:
-                    with ProfileSection('bot_update'):
-                        for bot in bots:
-                            bot.update(game_map, bot_update_interval)
-                    bot_update_timer = 0
-
-            # Gestion caméra et événements (mode GUI uniquement)
-            if not is_terminal_only:
-                with ProfileSection('handle_camera'):
-                    handle_camera(camera, raw_dt * GAME_SPEED)
+            for event in pygame.event.get():
+                handle_events(event, game_state)
                 
-                with ProfileSection('handle_events'):
-                    for event in pygame.event.get():
-                        handle_events(event, game_state)
-                        
-                        if event.type == pygame.QUIT:
+                if event.type == pygame.QUIT:
+                    running = False
+                
+                # Gestion game over
+                if game_state.get('game_over', False):
+                    pygame.mouse.set_visible(True)
+                    if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                        mx, my = pygame.mouse.get_pos()
+                        if game_state.get('game_over_button_rect') and game_state['game_over_button_rect'].collidepoint(mx, my):
+                            user_choices["menu_result"] = "quit"
                             running = False
-                        
-                        # Gestion game over
-                        if game_state.get('game_over', False):
-                            pygame.mouse.set_visible(True)
-                            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                                mx, my = pygame.mouse.get_pos()
-                                if game_state.get('game_over_button_rect') and game_state['game_over_button_rect'].collidepoint(mx, my):
-                                    user_choices["menu_result"] = "quit"
-                                    running = False
-                                if game_state.get('main_menu_button_rect') and game_state['main_menu_button_rect'].collidepoint(mx, my):
-                                    user_choices["menu_result"] = "main_menu"
-                                    game_state['game_over'] = False
-                                    game_state['return_to_menu'] = True
+                        if game_state.get('main_menu_button_rect') and game_state['main_menu_button_rect'].collidepoint(mx, my):
+                            user_choices["menu_result"] = "main_menu"
+                            game_state['game_over'] = False
+                            game_state['return_to_menu'] = True
 
         # Vérification retour menu
         if game_state.get('return_to_menu'):
@@ -378,8 +373,7 @@ def game_loop(screen, game_map, screen_width, screen_height, players):
             update_counter += dt
             if update_counter > 1:
                 update_counter = 0
-                with ProfileSection('update_minimap'):
-                    update_minimap_elements(game_state)
+                update_minimap_elements(game_state)
 
         # Mise à jour surfaces joueur
         if not game_state.get('paused', False):
@@ -399,8 +393,7 @@ def game_loop(screen, game_map, screen_width, screen_height, players):
                 )
                 game_state['player_info_updated'] = False
 
-            with ProfileSection('update_game_state'):
-                update_game_state(game_state, dt)
+            update_game_state(game_state, dt)
 
         # Vérification joueurs éliminés
         for p in players[:]:
@@ -428,32 +421,28 @@ def game_loop(screen, game_map, screen_width, screen_height, players):
         draw_timer += raw_dt
         if screen is not None and draw_timer >= 1 / FPS_DRAW_LIMITER:
             draw_timer = 0
+            screen.fill((0, 0, 0))
             
-            with ProfileSection('screen_fill'):
-                screen.fill((0, 0, 0))
-            
-            with ProfileSection('draw_map'):
-                draw_map(screen, screen_width, screen_height, game_map, camera,
-                        players, game_state['team_colors'], game_state, dt)
+            draw_map(screen, screen_width, screen_height, game_map, camera,
+                    players, game_state['team_colors'], game_state, dt)
 
             if game_state['show_gui_elements']:
-                with ProfileSection('draw_gui'):
-                    draw_gui_elements(screen, screen_width, screen_height)
-                    screen.blit(game_state['minimap_background'], game_state['minimap_background_rect'].topleft)
-                    screen.blit(game_state['minimap_entities_surface'], game_state['minimap_background_rect'].topleft)
-                    draw_minimap_viewport(screen, camera, game_state['minimap_background_rect'],
-                                         game_state['minimap_scale'], game_state['minimap_offset_x'],
-                                         game_state['minimap_offset_y'], game_state['minimap_min_iso_x'],
-                                         game_state['minimap_min_iso_y'])
+                draw_gui_elements(screen, screen_width, screen_height)
+                screen.blit(game_state['minimap_background'], game_state['minimap_background_rect'].topleft)
+                screen.blit(game_state['minimap_entities_surface'], game_state['minimap_background_rect'].topleft)
+                draw_minimap_viewport(screen, camera, game_state['minimap_background_rect'],
+                                     game_state['minimap_scale'], game_state['minimap_offset_x'],
+                                     game_state['minimap_offset_y'], game_state['minimap_min_iso_x'],
+                                     game_state['minimap_min_iso_y'])
 
-                    if player_selection_surface:
-                        sel_h = player_selection_surface.get_height()
-                        bg_rect = game_state['minimap_background_rect']
-                        screen.blit(player_selection_surface, (bg_rect.x, bg_rect.y - sel_h - 20))
+                if player_selection_surface:
+                    sel_h = player_selection_surface.get_height()
+                    bg_rect = game_state['minimap_background_rect']
+                    screen.blit(player_selection_surface, (bg_rect.x, bg_rect.y - sel_h - 20))
 
-                    if player_info_surface and game_state['show_player_info']:
-                        x_offset = int(screen_width * 0.03)
-                        screen.blit(player_info_surface, (x_offset, 0))
+                if player_info_surface and game_state['show_player_info']:
+                    x_offset = int(screen_width * 0.03)
+                    screen.blit(player_info_surface, (x_offset, 0))
 
             draw_pointer(screen)
 
@@ -486,11 +475,7 @@ def game_loop(screen, game_map, screen_width, screen_height, players):
                 pygame.display.flip()
                 continue
 
-            with ProfileSection('display_flip'):
-                pygame.display.flip()
-            
-            # Tick du profiler
-            tick_frame()
+            pygame.display.flip()
 
         # Synchronisation (vérification moins fréquente)
         if check_and_load_sync(game_map):

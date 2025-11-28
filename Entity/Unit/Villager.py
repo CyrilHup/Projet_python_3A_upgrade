@@ -94,7 +94,13 @@ class Villager(Unit):
             return
 
         if not self.collect_target or not self.collect_target.isAlive():
-            self.task = 'stock'
+            # Ne passer à stock que si on a des ressources à déposer
+            if self.carry.total() > 0:
+                self.task = 'stock'
+            else:
+                # Sinon chercher une nouvelle ressource ou passer en idle
+                self.task = None
+                self.collect_target = None
             return
         
         corner_distance = self.collect_target.size / 2.0 
@@ -205,8 +211,17 @@ class Villager(Unit):
     def seekRepair(self, game_map, dt):
         if self.task != 'repair':
             return
-        if not self.build_target or not self.build_target.isAlive() or self.build_target.hp < self.build_target.max_hp:
+        
+        # Arrêter si pas de cible, cible morte, OU bâtiment déjà à pleine vie
+        if not self.build_target or not self.build_target.isAlive():
             self.task = None
+            self.build_target = None
+            return
+        
+        # Bâtiment complètement réparé
+        if self.build_target.hp >= self.build_target.max_hp:
+            self.task = None
+            self.build_target = None
             return
 
         corner_distance = self.build_target.size / 2.0

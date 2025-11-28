@@ -2,12 +2,16 @@ import re
 import pygame
 import os
 import time
+import pickle
+import hashlib
+import io
 from collections import OrderedDict
 from Settings.setup import *
 
 sprites = {}
 zoom_cache = {}
-MAX_ZOOM_CACHE_PER_SPRITE = 60
+MAX_ZOOM_CACHE_PER_SPRITE = 200  # Augmenté pour moins de recalculs
+MAX_TOTAL_CACHE_SIZE = 2000  # Limite globale du cache
 
 gui_elements = {}
 gui_cache = {}
@@ -16,6 +20,114 @@ ASSETS_LOADED = False  # Indique si tout est chargé
 # On ajoute deux variables pour le suivi de progression
 ASSETS_TOTAL = 1
 ASSETS_LOADED_COUNT = 0
+
+# Cache directory for precomputed sprites
+CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.sprite_cache')
+CACHE_VERSION = "v3"  # Increment when sprite processing changes
+
+def ensure_cache_dir():
+    """Crée le répertoire de cache s'il n'existe pas."""
+    if not os.path.exists(CACHE_DIR):
+        os.makedirs(CACHE_DIR)
+
+def get_cache_key(config_hash):
+    """Génère un chemin de cache basé sur la configuration."""
+    return os.path.join(CACHE_DIR, f"sprites_{config_hash}_{CACHE_VERSION}.cache")
+
+def compute_config_hash():
+    """Calcule un hash de la configuration des sprites pour détecter les changements."""
+    # Hash basé sur sprite_config, gui_config et les mtimes des fichiers
+    config_str = str(sprite_config) + str(gui_config) + str(TILE_SIZE)
+    
+    # Ajouter les timestamps de modification des fichiers assets
+    assets_dir = resolve_asset_path('assets')
+    if os.path.exists(assets_dir):
+        for root, dirs, files in os.walk(assets_dir):
+            for f in sorted(files):
+                if f.lower().endswith('webp'):
+                    filepath = os.path.join(root, f)
+                    try:
+                        mtime = os.path.getmtime(filepath)
+                        config_str += f"{filepath}:{mtime}"
+                    except:
+                        pass
+    
+    return hashlib.md5(config_str.encode()).hexdigest()[:16]
+
+def surface_to_bytes(surface):
+    """Convertit une surface pygame en bytes pour la sérialisation."""
+    return (pygame.image.tostring(surface, 'RGBA'), surface.get_size())
+
+def bytes_to_surface(data):
+    """Reconvertit des bytes en surface pygame."""
+    raw_data, size = data
+    return pygame.image.fromstring(raw_data, size, 'RGBA').convert_alpha()
+
+def save_sprites_cache(sprites_data, gui_data, cache_path):
+    """Sauvegarde les sprites dans le cache."""
+    try:
+        ensure_cache_dir()
+        
+        # Convertir les surfaces en bytes
+        serializable_sprites = {}
+        for category, cat_data in sprites_data.items():
+            serializable_sprites[category] = {}
+            for name, name_data in cat_data.items():
+                if isinstance(name_data, list):
+                    serializable_sprites[category][name] = [surface_to_bytes(s) for s in name_data]
+                elif isinstance(name_data, dict):
+                    serializable_sprites[category][name] = {}
+                    for state, state_data in name_data.items():
+                        if isinstance(state_data, list):
+                            serializable_sprites[category][name][state] = [surface_to_bytes(s) for s in state_data]
+                        elif isinstance(state_data, dict):
+                            serializable_sprites[category][name][state] = {}
+                            for dir_idx, frames in state_data.items():
+                                serializable_sprites[category][name][state][dir_idx] = [surface_to_bytes(s) for s in frames]
+        
+        serializable_gui = {}
+        for key, surfaces in gui_data.items():
+            serializable_gui[key] = [surface_to_bytes(s) for s in surfaces]
+        
+        with open(cache_path, 'wb') as f:
+            pickle.dump({'sprites': serializable_sprites, 'gui': serializable_gui}, f, pickle.HIGHEST_PROTOCOL)
+        
+        print(f"Cache saved to {cache_path}")
+        return True
+    except Exception as e:
+        print(f"Failed to save cache: {e}")
+        return False
+
+def load_sprites_cache(cache_path):
+    """Charge les sprites depuis le cache."""
+    try:
+        with open(cache_path, 'rb') as f:
+            data = pickle.load(f)
+        
+        loaded_sprites = {}
+        for category, cat_data in data['sprites'].items():
+            loaded_sprites[category] = {}
+            for name, name_data in cat_data.items():
+                if isinstance(name_data, list):
+                    loaded_sprites[category][name] = [bytes_to_surface(s) for s in name_data]
+                elif isinstance(name_data, dict):
+                    loaded_sprites[category][name] = {}
+                    for state, state_data in name_data.items():
+                        if isinstance(state_data, list):
+                            loaded_sprites[category][name][state] = [bytes_to_surface(s) for s in state_data]
+                        elif isinstance(state_data, dict):
+                            loaded_sprites[category][name][state] = {}
+                            for dir_idx, frames in state_data.items():
+                                loaded_sprites[category][name][state][dir_idx] = [bytes_to_surface(s) for s in frames]
+        
+        loaded_gui = {}
+        for key, surfaces in data['gui'].items():
+            loaded_gui[key] = [bytes_to_surface(s) for s in surfaces]
+        
+        return loaded_sprites, loaded_gui
+    except Exception as e:
+        print(f"Failed to load cache: {e}")
+        return None, None
 
 def get_assets_progress():
     """
@@ -27,13 +139,25 @@ def get_assets_progress():
 def is_assets_loaded():
     return ASSETS_LOADED
 
+def get_cache_path(filepath, scale, adjust):
+    """Génère un chemin de cache unique basé sur le fichier et les paramètres."""
+    # Créer une clé unique basée sur le chemin, mtime et paramètres
+    try:
+        mtime = os.path.getmtime(filepath)
+    except:
+        mtime = 0
+    key = f"{filepath}_{mtime}_{scale}_{adjust}_{CACHE_VERSION}"
+    hash_key = hashlib.md5(key.encode()).hexdigest()
+    return os.path.join(CACHE_DIR, f"{hash_key}.cache")
+
 def load_sprite(filepath=None, scale=None, adjust=None):
     if filepath:
         sprite = pygame.image.load(filepath).convert_alpha()
     if scale:
-        sprite = pygame.transform.smoothscale(sprite, (int(scale[0]), int(scale[1])))
+        # Utiliser scale au lieu de smoothscale pour plus de rapidité
+        sprite = pygame.transform.scale(sprite, (int(scale[0]), int(scale[1])))
     if adjust:
-        sprite = pygame.transform.smoothscale(sprite, (
+        sprite = pygame.transform.scale(sprite, (
             int(sprite.get_width() * adjust),
             int(sprite.get_height() * adjust)
         ))
@@ -57,7 +181,8 @@ def extract_Unitframes(sheet, rows, columns, frames_entity, scale=TILE_SIZE / 40
                 x = col * frame_width
                 y = row * frame_height
                 frame = sheet.subsurface(pygame.Rect(x, y, frame_width, frame_height))
-                frame = pygame.transform.smoothscale(frame, (target_width, target_height))
+                # Utiliser scale au lieu de smoothscale pour plus de rapidité
+                frame = pygame.transform.scale(frame, (target_width, target_height))
                 frames.append(frame)
     return frames
 
@@ -76,7 +201,8 @@ def extract_Projectileframes(sheet, rows, columns, frames_entity, scale=TILE_SIZ
                 x = col * frame_width
                 y = row * frame_height
                 frame = sheet.subsurface(pygame.Rect(x, y, frame_width, frame_height))
-                frame = pygame.transform.smoothscale(frame, (target_width, target_height))
+                # Utiliser scale au lieu de smoothscale pour plus de rapidité
+                frame = pygame.transform.scale(frame, (target_width, target_height))
                 frames.append(frame)
     return frames
 
@@ -97,7 +223,8 @@ def extract_Buildingframes(sheet, rows, columns, frames_entity, scale=TILE_SIZE 
                 x = col * frame_width
                 y = row * frame_height
                 frame = sheet.subsurface(pygame.Rect(x, y, frame_width, frame_height))
-                frame = pygame.transform.smoothscale(frame, (target_width, target_height))
+                # Utiliser scale au lieu de smoothscale pour plus de rapidité
+                frame = pygame.transform.scale(frame, (target_width, target_height))
                 frames.append(frame)
     return frames
 
@@ -137,24 +264,67 @@ def resolve_asset_path(relative_path):
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(project_root, relative_path)
 
+def count_asset_files_fast():
+    """Compte rapidement le nombre de fichiers webp sans parcourir tout l'arbre."""
+    count = 0
+    # Compter les fichiers GUI
+    for gui_key, gui_val in gui_config.items():
+        directory = gui_val.get('directory')
+        if directory:
+            abs_dir = resolve_asset_path(directory)
+            if os.path.isdir(abs_dir):
+                count += len([f for f in os.listdir(abs_dir) if f.lower().endswith('webp')])
+    
+    # Compter les fichiers de sprites
+    for category in sprite_config:
+        for sprite_name, value in sprite_config[category].items():
+            directory = value['directory']
+            abs_dir = resolve_asset_path(directory)
+            if os.path.isdir(abs_dir):
+                if category in ['resources']:
+                    count += len([f for f in os.listdir(abs_dir) if f.lower().endswith('webp')])
+                else:
+                    # Pour buildings, units, projectiles: compter les sous-dossiers
+                    for state_dir in os.listdir(abs_dir):
+                        state_path = os.path.join(abs_dir, state_dir)
+                        if os.path.isdir(state_path):
+                            count += len([f for f in os.listdir(state_path) if f.lower().endswith('webp')])
+    return count
+
 def load_sprites(screen, screen_width, screen_height, show_progress=False):
     """
     Chargement complet des sprites (GUI, ressources, unités, bâtiments).
+    Utilise un cache sur disque pour accélérer les lancements suivants.
     show_progress=False => on ne dessine pas la barre de progression
                            (chargement en arrière-plan).
     """
-    global ASSETS_LOADED, ASSETS_TOTAL, ASSETS_LOADED_COUNT
+    global ASSETS_LOADED, ASSETS_TOTAL, ASSETS_LOADED_COUNT, sprites, gui_elements
     if ASSETS_LOADED:
         return
 
     ASSETS_LOADED = False
     ASSETS_LOADED_COUNT = 0
-
-    global gui_elements
     gui_elements.clear()
 
-    # Calculate total files using absolute path
-    total_files = sum(len(files) for _, _, files in os.walk(resolve_asset_path('assets')))
+    # Vérifier si un cache valide existe
+    config_hash = compute_config_hash()
+    cache_path = get_cache_key(config_hash)
+    
+    if os.path.exists(cache_path):
+        print("Loading sprites from cache...")
+        start_time = time.time()
+        cached_sprites, cached_gui = load_sprites_cache(cache_path)
+        if cached_sprites is not None and cached_gui is not None:
+            sprites.update(cached_sprites)
+            gui_elements.update(cached_gui)
+            ASSETS_LOADED = True
+            print(f"Sprites loaded from cache in {time.time() - start_time:.2f}s")
+            return
+        else:
+            print("Cache invalid, reloading sprites...")
+
+    # Comptage rapide des fichiers (évite os.walk complet)
+    total_files = count_asset_files_fast()
     ASSETS_TOTAL = max(1, total_files)
 
     loading_screen = None
@@ -334,11 +504,17 @@ def load_sprites(screen, screen_width, screen_height, show_progress=False):
     ASSETS_LOADED = True
     print("Sprites loaded successfully.")
     
+    # Sauvegarder dans le cache pour les prochains lancements
+    save_sprites_cache(sprites, gui_elements, cache_path)
+    
 def get_scaled_sprite(name, category, zoom, state, direction, frame_id, variant):
+    # Quantifier le zoom pour réduire les variations de cache (par pas de 0.05)
+    quantized_zoom = round(zoom * 20) / 20
+    
     if name not in zoom_cache:
         zoom_cache[name] = OrderedDict()
     
-    cache_key = (zoom, state, frame_id, variant, direction)
+    cache_key = (quantized_zoom, state, frame_id, variant, direction)
     if cache_key in zoom_cache[name]:
         zoom_cache[name].move_to_end(cache_key)
         return zoom_cache[name][cache_key]
@@ -357,10 +533,11 @@ def get_scaled_sprite(name, category, zoom, state, direction, frame_id, variant)
     except IndexError as e:
         raise ValueError(f"Error accessing sprite: {e}")
     
-    scaled_width = max(1, int(original_image.get_width() * zoom))
-    scaled_height = max(1, int(original_image.get_height() * zoom))
+    scaled_width = max(1, int(original_image.get_width() * quantized_zoom))
+    scaled_height = max(1, int(original_image.get_height() * quantized_zoom))
 
-    scaled_image = pygame.transform.smoothscale(original_image, (scaled_width, scaled_height))
+    # Utiliser scale au lieu de smoothscale pour plus de rapidité (moins lisse mais plus rapide)
+    scaled_image = pygame.transform.scale(original_image, (scaled_width, scaled_height))
     zoom_cache[name][cache_key] = scaled_image
     zoom_cache[name].move_to_end(cache_key)
 

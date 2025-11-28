@@ -79,7 +79,6 @@ class Team:
     def build(self, building_type, x, y, num_builders, game_map, force=False):
         # Add safety check for team ID
         if self.teamID >= len(game_map.players):
-            print(f"Warning: Invalid team ID {self.teamID} for {len(game_map.players)} players")
             return False
 
         building_class = building_class_map[building_type]

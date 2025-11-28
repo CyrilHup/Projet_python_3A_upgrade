@@ -81,14 +81,26 @@ class GameMap:
             return False
             
         remove_counter = 0
+        positions_to_clean = []  # Pour nettoyer resources dict aussi
+        
         for pos, matrix_entities in list(self.grid.items()):
             for matrix_entity in list(matrix_entities):
                 if matrix_entity.entity_id == entity.entity_id:
                     matrix_entities.remove(matrix_entity)
+                    positions_to_clean.append(pos)
                     remove_counter += 1
                     if not matrix_entities:
                         del self.grid[pos]
                     if remove_counter >= entity.size * entity.size:
+                        # Nettoyer le dictionnaire resources aussi
+                        if entity.hasResources:
+                            for clean_pos in positions_to_clean:
+                                if clean_pos in self.resources:
+                                    if entity in self.resources[clean_pos]:
+                                        self.resources[clean_pos].remove(entity)
+                                    if not self.resources[clean_pos]:
+                                        del self.resources[clean_pos]
+                        
                         if entity.team != None:
                             self.players[entity.team].remove_member(entity)
                             # Mise à jour de old_resources quand une entité est supprimée
@@ -445,25 +457,40 @@ class GameMap:
         del self.projectiles[projectile.id]
 
     def patch(self, dt):
+        # Optimisation : collecter les entités uniques une seule fois
+        # Utiliser un set pour éviter les doublons (une entité peut occuper plusieurs tiles)
         active_entities = set()
         for entities in self.grid.values():
             active_entities.update(entities)
 
+        # Mise à jour des entités actives
+        entities_to_deactivate = []
         for entity in active_entities:
             entity.update(self, dt)
             if not entity.isAlive():
-                self.move_to_inactive(entity)
+                entities_to_deactivate.append(entity)
+        
+        # Déplacer vers inactive après l'itération (évite modification pendant itération)
+        for entity in entities_to_deactivate:
+            self.move_to_inactive(entity)
 
+        # Mise à jour des entités inactives
         inactive_entities = set()
         for entities in self.inactive_matrix.values():
             inactive_entities.update(entities)
 
+        entities_to_remove = []
         for entity in inactive_entities:
             entity.update(self, dt)
             if not entity.state:
-                self.remove_inactive(entity)
-        projectiles = self.projectiles.copy()
-        for projectile in projectiles.values():
+                entities_to_remove.append(entity)
+        
+        for entity in entities_to_remove:
+            self.remove_inactive(entity)
+        
+        # Mise à jour des projectiles
+        projectiles = list(self.projectiles.values())
+        for projectile in projectiles:
             projectile.update(self, dt)
             if projectile.state == '':
                 self.remove_projectile(projectile)

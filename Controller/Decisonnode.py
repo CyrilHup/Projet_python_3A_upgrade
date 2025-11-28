@@ -57,9 +57,35 @@ def balance_army_action(bot):
     bot.balance_units() # Balance units action
 
 def repair_buildings_action(bot):
-    # Assuming priority_6 is for repair as per your initial request
-    # if priority_6 action is not defined in Bot.py please check and adapt or replace with relevant repair logic
-    pass # bot.priority_6() # Repair buildings action - adapt if needed
+    """Envoie des villageois réparer les bâtiments endommagés."""
+    critical_buildings = bot.get_critical_points()
+    if not critical_buildings:
+        return False
+    
+    # Trouver des villageois disponibles
+    available_villagers = [
+        unit for unit in bot.team.units 
+        if hasattr(unit, 'task') and (unit.task is None or unit.task == 'idle')
+        and hasattr(unit, 'set_task')
+    ]
+    
+    if not available_villagers:
+        return False
+    
+    # Assigner jusqu'à 2 villageois par bâtiment endommagé
+    villagers_assigned = 0
+    for building in critical_buildings[:3]:  # Max 3 bâtiments à la fois
+        for villager in available_villagers[:2]:  # Max 2 villageois par bâtiment
+            if villager not in building.builders:
+                villager.set_task('repair', building)
+                villagers_assigned += 1
+                available_villagers.remove(villager)
+                if not available_villagers:
+                    break
+        if not available_villagers:
+            break
+    
+    return villagers_assigned > 0
 
 def manage_offense_action(bot):
     """Version simplifiée de manage_offense pour l'arbre de décision économique"""
